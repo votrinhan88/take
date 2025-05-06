@@ -1,0 +1,12 @@
+[submodule "references/dataset-distillation"]
+	path = references/dataset-distillation
+	url = https://github.com/ilia10000/dataset-distillation
+[submodule "references/dataset-distillation-with-attention-labels"]
+	path = references/dataset-distillation-with-attention-labels
+	url = https://github.com/arumaekawa/dataset-distillation-with-attention-labels
+[submodule "references/DiLM"]
+	path = references/DiLM
+	url = https://github.com/arumaekawa/DiLM
+[submodule "references/vec2text"]
+	path = references/vec2text
+	url = https://github.com/vec2text/vec2text
