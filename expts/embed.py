@@ -81,7 +81,7 @@ class ConfigFactory:
             "loader_kwargs": {"batch_size": 1000, "shuffle": False, "num_workers": 4},
             "splits_corpus": self.metadata_dataset.get_preset()["splits_corpus"],
         }
-        if self.dataset in ["mnlim", "qqp", "sst2"]:
+        if self.dataset in self.metadata_dataset.requires_unify_map:
             config["unify_text"] = True
         return config
 
