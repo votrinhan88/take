@@ -601,7 +601,7 @@ def expt_clf2(config: dict, run: int | str = 0):
 
 if __name__ == "__main__":
     import argparse
-    from expts.expt_utils import ConfigParser, TypeArgparse, pprint, rename_runs
+    from expt_utils import ConfigParser, TypeArgparse, pprint, rename_runs
 
     args = argparse.ArgumentParser()
     args_group = args.add_argument_group("Metaconfig arguments")
