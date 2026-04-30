@@ -1,19 +1,9 @@
 #!/bin/bash
-# Interactive TUI for launching experiments with slurm/python kwargs
-
-set -e
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$REPO/.env"
+source "$REPO/.env" || true
 
-# Color codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Experiments
+EXPERIMENT_NAMES=(embed classify classify2 condense finetune generate)
 declare -A EXPERIMENTS=(
     [embed]="expts/embed.py"
     [classify]="expts/classify.py"
@@ -22,83 +12,43 @@ declare -A EXPERIMENTS=(
     [finetune]="expts/finetune.py"
     [generate]="expts/generate.py"
 )
+declare -A EXPERIMENT_SCRIPTS=(
+    [embed]="scripts/embed.sh"
+    [classify]="scripts/classify.sh"
+    [classify2]="scripts/classify2.sh"
+    [condense]="scripts/condense.sh"
+    [finetune]="scripts/finetune.sh"
+    [generate]="scripts/generate.sh"
+)
 
-show_menu() {
-    clear
-    echo -e "${BLUE}=== TextDD Experiment Launcher ===${NC}\n"
-    echo "Select experiment:"
-    local i=1
-    for name in "${!PIPELINES[@]}"; do
-        echo "  $i) $name"
-        ((i++))
+menu() {
+    local title=$1
+    shift
+    local -a options=("$@")
+
+    echo "" >&2
+    echo "=== $title ===" >&2
+    for i in "${!options[@]}"; do
+        [[ $i -eq $((${#options[@]}-1)) ]] && continue
+        echo "[$((i+1))] ${options[$i]}" >&2
     done
-    echo "  0) Exit"
-    echo ""
-}
-
-get_pipeline_choice() {
-    local choice
-    read -p "Enter choice: " choice
-
-    local i=1
-    for name in "${!EXPERIMENTS[@]}"; do
-        if [[ $choice -eq $i ]]; then
-            echo "$name"
-            return 0
-        fi
-        ((i++))
-    done
+    echo "[0] ${options[-1]}" >&2
+    echo "" >&2
+    read -p "Choose [0-$((${#options[@]}-1))] (default 1): " choice
+    choice=${choice:-1}
 
     if [[ $choice -eq 0 ]]; then
-        echo "exit"
-        return 0
+        echo "${options[-1]}"
+    elif [[ $choice -ge 1 && $choice -le $((${#options[@]}-1)) ]]; then
+        echo "${options[$((choice-1))]}"
     fi
-
-    echo ""
-}
-
-show_run_mode() {
-    local pipeline=$1
-    clear
-    echo -e "${BLUE}=== $pipeline ===${NC}\n"
-    echo "Run mode:"
-    echo "  1) Local (python)"
-    echo "  2) SLURM (sbatch)"
-    echo "  0) Back"
-    echo ""
-}
-
-get_run_mode() {
-    read -p "Enter choice: " choice
-    echo "$choice"
-}
-
-get_kwargs() {
-    local mode=$1  # "local" or "slurm"
-    local prompt=""
-
-    if [[ "$mode" == "slurm" ]]; then
-        prompt="Enter SLURM kwargs (e.g., --gres=gpu:1 --time=01:00:00): "
-    else
-        prompt="Enter Python kwargs (e.g., --config=clf-logistic-tfidf-agnews): "
-    fi
-
-    read -p "$prompt" kwargs
-    echo "$kwargs"
-}
-
-get_python_kwargs() {
-    read -p "Enter Python kwargs (e.g., --config=clf-logistic-tfidf-agnews): " kwargs
-    echo "$kwargs"
 }
 
 run_local() {
     local experiment=$1
     local py_kwargs=$2
-
-    echo -e "\n${GREEN}Running locally...${NC}"
     source "$REPO/.venv/bin/activate"
-    python "$REPO/${EXPERIMENTS[$experiment]}" $py_kwargs
+    python -u "$REPO/${EXPERIMENTS[$experiment]}" $py_kwargs
 }
 
 run_slurm() {
@@ -106,59 +56,70 @@ run_slurm() {
     local slurm_kwargs=$2
     local py_kwargs=$3
 
-    echo -e "\n${GREEN}Submitting to SLURM...${NC}"
-
     sbatch \
         --output="$REPO/slurm/%j.out" \
         --error="$REPO/slurm/%j.err" \
         $slurm_kwargs \
-        --wrap="source $REPO/.env && source $REPO/.venv/bin/activate && python $REPO/${EXPERIMENTS[$experiment]} $py_kwargs"
+        "$REPO/${EXPERIMENT_SCRIPTS[$experiment]}" \
+        $py_kwargs
 
-    echo -e "${GREEN}Job submitted!${NC}"
-    sleep 2
+    echo "Job submitted!"
+    sleep 1
+}
+
+_pick_preset() {
+    local prefix=$1 title=$2
+    local -a names=() vals=()
+    while IFS='=' read -r key val; do
+        local label="${key#${prefix}}"
+        names+=("${label#*_}")
+        vals+=("${val//\"/}")
+    done < <(compgen -v | grep "^${prefix}" | sort -V | while read -r v; do echo "$v=${!v}"; done)
+    local choice
+    choice=$(menu "$title" "${names[@]}" "Back")
+    [[ -z "$choice" || "$choice" == "Back" ]] && return 1
+    for i in "${!names[@]}"; do
+        [[ "${names[$i]}" == "$choice" ]] && echo "${vals[$i]}" && return 0
+    done
 }
 
 main() {
     while true; do
-        show_menu
-        experiment=$(get_pipeline_choice)
+        local -a experiments=("${EXPERIMENT_NAMES[@]}" "Exit")
 
-        if [[ "$experiment" == "exit" ]]; then
-            echo "Exiting..."
-            exit 0
+        exp=$(menu "TextDD Experiments" "${experiments[@]}")
+        [[ "$exp" == "Exit" ]] && exit 0
+        [[ -z "$exp" ]] && continue
+
+        mode=$(menu "$exp - Run Mode" "SLURM" "Local" "Back")
+        [[ -z "$mode" || "$mode" == "Back" ]] && continue
+
+        if [[ "$mode" == "Local" ]]; then
+            sed -n '/^# Args:/,/^[^#]/{ /^[^#]/d; p }' "$REPO/${EXPERIMENT_SCRIPTS[$exp]}" >&2
+            read -p "Python kwargs: " py_kwargs
+            run_local "$exp" "$py_kwargs"
+        else
+            local spec_kwargs dur_kwargs
+            spec_kwargs=$(_pick_preset "SPEC_" "SLURM Spec") || continue
+            dur_kwargs=$(_pick_preset "DUR_" "SLURM Duration") || continue
+            local slurm_kwargs="$spec_kwargs $dur_kwargs"
+
+            sed -n '/^# Args:/,/^[^#]/{ /^[^#]/d; p }' "$REPO/${EXPERIMENT_SCRIPTS[$exp]}" >&2
+            read -p "Python kwargs: " py_kwargs
+            echo "" >&2
+            echo "sbatch \\" >&2
+            echo "    --output=$REPO/slurm/%j.out \\" >&2
+            echo "    --error=$REPO/slurm/%j.err \\" >&2
+            for kw in $slurm_kwargs; do echo "    $kw \\" >&2; done
+            echo "    $REPO/${EXPERIMENT_SCRIPTS[$exp]} \\" >&2
+            echo "    $py_kwargs" >&2
+            echo "" >&2
+            read -p "Submit? [Y/n]: " confirm
+            [[ "$confirm" =~ ^[Nn] ]] && continue
+            run_slurm "$exp" "$slurm_kwargs" "$py_kwargs"
         fi
 
-        if [[ -z "$experiment" ]]; then
-            continue
-        fi
-
-        while true; do
-            show_run_mode "$experiment"
-            mode=$(get_run_mode)
-
-            case $mode in
-                1)
-                    py_kwargs=$(get_python_kwargs)
-                    run_local "$experiment" "$py_kwargs"
-                    read -p "Press Enter to continue..."
-                    break
-                    ;;
-                2)
-                    slurm_kwargs=$(get_kwargs "slurm")
-                    py_kwargs=$(get_python_kwargs)
-                    run_slurm "$experiment" "$slurm_kwargs" "$py_kwargs"
-                    read -p "Press Enter to continue..."
-                    break
-                    ;;
-                0)
-                    break
-                    ;;
-                *)
-                    echo -e "${RED}Invalid choice${NC}"
-                    sleep 1
-                    ;;
-            esac
-        done
+        read -p "Press Enter to continue..."
     done
 }
 
