@@ -1,9 +1,6 @@
+from copy import deepcopy
 import os
 import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(__file__, "../..")))
-
-from copy import deepcopy
 from typing import Callable
 
 from datasets import concatenate_datasets, load_dataset, Dataset, DatasetDict
@@ -11,6 +8,12 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+repo_path = os.path.abspath(os.path.join(__file__, "../.."))
+assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
+if sys.path[0] != repo_path:
+    sys.path.insert(0, repo_path)
+
+from expts.expt_utils import get_dataset, get_dataloader, get_encoder
 from src.models.encoders import (
     EncoderMetadata,
     Tfidf,
@@ -19,7 +22,6 @@ from src.models.encoders import (
     MiniLMWrapper,
     JinaWrapper,
 )
-from pipelines.expt_utils import get_dataset, get_dataloader, get_encoder
 from src.utils.metadata import DatasetMetadata
 
 
@@ -66,7 +68,7 @@ class ConfigFactory:
         self.metaconfig = {
             "name": f"emb-{self.encoder}-{self.dataset}",
             "expt": "emb",
-            "path": "./logs/",
+            "path": "./results/raw/embed",
             "args": self.args,
             "run": "eval:f'{run}'",
         }
@@ -91,7 +93,7 @@ class ConfigFactory:
             config["encoder"].update(
                 {
                     "fit_with": "self",
-                    "save_path": f"eval:f'./logs/embed/{name}/{name}-run={{run}}.pt'",
+                    "save_path": f"eval:f'./results/raw/embed/{name}/{name}-run={{run}}.pt'",
                 }
             )
         return config
@@ -99,7 +101,7 @@ class ConfigFactory:
     def get_config_embed(self) -> dict:
         name = self.metaconfig["name"]
         config = {
-            "path_output": f"eval:f'./logs/embed/{name}/{name}-run={{run}}/'",
+            "path_output": f"eval:f'./results/raw/embed/{name}/{name}-run={{run}}/'",
         }
         return config
 
@@ -190,7 +192,7 @@ def expt_emb(config: dict, run: int | str):
         print(f"Encoder {encoder} with embeddings {encoder.embeddings.shape}.")
     if config["models"]["encoder"].get("save_path"):
         os.makedirs(os.path.dirname(config["models"]["encoder"]["save_path"]), exist_ok=True)
-        torch.save(obj=encoder, f=config["models"]["encoder"]["save_path"])
+        torch.save(obj=encoder.state_dict(), f=config["models"]["encoder"]["save_path"])
 
     def preembed(batch: dict) -> dict:
         batch["embeddings"] = encoder(batch["text"])
@@ -205,7 +207,7 @@ if __name__ == "__main__":
     import argparse
     import yaml
 
-    from .expt_utils import ConfigParser, TypeArgparse, pprint, rename_runs
+    from expts.expt_utils import ConfigParser, TypeArgparse, pprint, rename_runs
 
     # fmt: off
     args = argparse.ArgumentParser()
@@ -234,7 +236,9 @@ if __name__ == "__main__":
     # fmt: on
 
     parser = ConfigParser(globals=globals(), locals=locals())
-    config = ConfigFactory(**custom_args).get_config()
+    config_factory = ConfigFactory(**custom_args)
+    config = config_factory.get_config()
+    config_factory.export_config(verbose=True)
     for run in rename_runs(run=args.run, n_runs=args.n_runs):
         config_run = parser.parse_eval_config(deepcopy(config), parse_flag="eval:")
         pprint(config_run)
