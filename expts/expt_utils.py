@@ -2,8 +2,10 @@ import os
 from copy import deepcopy
 import sys
 from typing import overload
+import evaluate
+import numpy as np
 
-from datasets import load_dataset, ClassLabel, Dataset, DatasetDict
+from datasets import load_dataset, ClassLabel, Dataset, DatasetDict, disable_caching
 from peft import get_peft_model, LoraConfig
 import pprint as Pprint
 import torch
@@ -12,12 +14,17 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-sys.path.insert(0, os.path.abspath(os.path.join(__file__, "../..")))
+repo_path = os.path.abspath(os.path.join(__file__, "../.."))
+assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
+if sys.path[0] != repo_path:
+    sys.path.insert(0, repo_path)
 
-from src.models.encoders.metadata import EncoderMetadata
-from src.models.llms.metadata import LLMMetadata
-from src.utils.metadata import DatasetMetadata
+from src.metadata import EncoderMetadata
+from src.metadata import LLMMetadata
+from src.metadata import DatasetMetadata
 from src.utils.pythonic.dict_utils import spread_dict
+
+disable_caching()
 
 
 class ConfigParser:
@@ -120,7 +127,7 @@ def get_dataset(config: dict) -> DatasetDict:
         dataset_default = load_dataset(
             **dataset_metadata.get_preset()["load_dataset_kwargs"],  # {path, ?name}
             split=config["splits"],
-            cache_dir="./datasets",
+            cache_dir="./datasets/raw",
         )
         dataset.update({k: ds for k, ds in zip(config["splits"], dataset_default)})
     # Load custom splits
@@ -178,7 +185,10 @@ def get_encoder(config: dict, dataloader: DataLoader | None = None) -> nn.Module
 
     # Init encoder
     if config.get("init_with") == "torch_load":
-        encoder = torch.load(**config["torch_load_kwargs"])
+        encoder = config["Class"](**config["kwargs"])
+        encoder.load_state_dict(torch.load(**config["torch_load_kwargs"], weights_only=True))
+    elif config.get("init_with") == "self_load":
+        encoder = config["Class"].load(config["self_load_kwargs"]["f"])
     else:
         encoder = config["Class"](**config["kwargs"])
 
@@ -244,6 +254,52 @@ def get_llm_tokenizer(config: dict) -> PreTrainedTokenizerBase:
         tokenizer.pad_token = tokenizer.eos_token
 
     return tokenizer
+
+
+class SequenceClassificationMetrics:
+    supported_metrics = ["accuracy", "precision", "recall", "f1"]
+
+    def __init__(self, metrics: str | list = "all"):
+        self.metrics = self._validate_args("metrics", metrics)
+
+        self.metric_objs = {}
+        for metric in self.metrics:
+            self.metric_objs[metric] = evaluate.load(metric)
+
+    def _validate_args(self, arg: str, value):
+        if arg == "metrics":
+            if isinstance(value, str):
+                if value == "all":
+                    return [m for m in self.supported_metrics]
+                else:
+                    value = [value]
+
+            for metric in value:
+                if metric not in self.supported_metrics:
+                    raise ValueError(
+                        f"Unsupported metric: {metric}. Supported: {self.supported_metrics}"
+                    )
+            return value
+
+    def __call__(self, eval_pred, **kwargs) -> dict:
+        return self.compute_metrics(eval_pred)
+
+    def compute_metrics(self, eval_pred, **kwargs) -> dict:
+        preds, labels = eval_pred
+        results = {}
+        preds = np.argmax(preds, axis=1)
+        for metric in self.metrics:
+            metric_obj = self.metric_objs[metric]
+            if metric in ["accuracy"]:
+                results.update(metric_obj.compute(predictions=preds, references=labels))
+            elif metric in ["precision", "recall", "f1"]:
+                results.update(
+                    metric_obj.compute(predictions=preds, references=labels, average="macro")
+                )
+        return results
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(metrics={self.metrics})"
 
 
 if __name__ == "__main__":

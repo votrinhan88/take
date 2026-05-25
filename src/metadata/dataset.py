@@ -4,6 +4,8 @@ from typing import overload
 
 class DatasetMetadata:
     supported = ["agnews", "imdb", "mnlim", "qqp", "sst2", "qnli"]
+    supported_cls = ["agnews", "imdb", "sst2"]
+    supported_nli = ["mnlim", "qqp", "qnli"]
     requires_unify_map = ["mnlim", "qqp", "sst2", "qnli"]
 
     def __init__(self, dataset: str = "agnews"):
@@ -15,6 +17,7 @@ class DatasetMetadata:
         self.task = preset_metadata["task"]
         self.classes = preset_metadata["classes"]
         self.original_splits = preset_metadata["original_splits"]
+        self.text_keys = preset_metadata["text_keys"]
 
         self.num_classes = len(self.classes)
         self.class_2_idx = {k: i for i, k in enumerate(self.classes)}
@@ -23,32 +26,34 @@ class DatasetMetadata:
         # Add load_dataset_kwargs for HuggingFace datasets
         if self.dataset == "agnews":
             preset_metadata = {
-                "task": "classification",
+                "task": "cls",
                 "classes": ["World", "Sports", "Business", "Sci/Tech"],
                 "original_splits": {
                     "train": {"features": ["text", "label"], "num_rows": 120000},
                     "test": {"features": ["text", "label"], "num_rows": 7600},
                 },
+                "text_keys": ["text"],
                 "splits_corpus": ["train"],
                 "load_dataset_kwargs": {"path": "fancyzhx/ag_news"},
             }
 
         elif self.dataset == "imdb":
             preset_metadata = {
-                "task": "classification",
+                "task": "cls",
                 "classes": ["neg", "pos"],
                 "original_splits": {
                     "train": {"features": ["text", "label"], "num_rows": 25000},
                     "test": {"features": ["text", "label"], "num_rows": 25000},
                     "unsupervised": {"features": ["text", "label"], "num_rows": 50000},
                 },
+                "text_keys": ["text"],
                 "splits_corpus": ["train", "unsupervised"],
                 "load_dataset_kwargs": {"path": "stanfordnlp/imdb"},
             }
 
         elif self.dataset == "mnlim":
             preset_metadata = {
-                "task": "classification",
+                "task": "nli",
                 "classes": ["entailment", "neutral", "contradiction"],
                 "original_splits": {
                     "train": {
@@ -72,13 +77,14 @@ class DatasetMetadata:
                         "num_rows": 9847,
                     },
                 },
+                "text_keys": ["premise", "hypothesis"],
                 "splits_corpus": ["train"],
                 "load_dataset_kwargs": {"path": "glue", "name": "mnli"},
             }
 
         elif self.dataset == "qnli":
             preset_metadata = {
-                "task": "classification",
+                "task": "nli",
                 "classes": ["entailment", "not_entailment"],
                 "original_splits": {
                     "train": {
@@ -94,13 +100,14 @@ class DatasetMetadata:
                         "num_rows": 5463,
                     },
                 },
+                "text_keys": ["question", "sentence"],
                 "splits_corpus": ["train"],
                 "load_dataset_kwargs": {"path": "glue", "name": "qnli"},
             }
 
         elif self.dataset == "qqp":
             preset_metadata = {
-                "task": "classification",
+                "task": "nli",
                 "classes": ["not_duplicate", "duplicate"],
                 "original_splits": {
                     "train": {
@@ -116,19 +123,21 @@ class DatasetMetadata:
                         "num_rows": 390965,
                     },
                 },
+                "text_keys": ["question1", "question2"],
                 "splits_corpus": ["train"],
                 "load_dataset_kwargs": {"path": "glue", "name": "qqp"},
             }
 
         elif self.dataset == "sst2":
             preset_metadata = {
-                "task": "classification",
+                "task": "cls",
                 "classes": ["negative", "positive"],
                 "original_splits": {
                     "train": {"features": ["idx", "sentence", "label"], "num_rows": 67349},
                     "validation": {"features": ["idx", "sentence", "label"], "num_rows": 872},
                     "test": {"features": ["idx", "sentence", "label"], "num_rows": 1821},
                 },
+                "text_keys": ["sentence"],
                 "splits_corpus": ["train"],
                 "load_dataset_kwargs": {"path": "stanfordnlp/sst2"},
             }

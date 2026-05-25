@@ -19,7 +19,7 @@ class SiameseLogistic(BaseClassifier):
         self.return_logits = return_logits
 
         # Classifier on combined representation [u; v; |u-v|; u*v]
-        self.classifier = nn.Linear(input_dim * 4, num_classes)
+        self.linear = nn.Linear(input_dim * 4, num_classes)
 
         if not self.return_logits:
             if self.num_classes == 1:
@@ -40,7 +40,7 @@ class SiameseLogistic(BaseClassifier):
     def forward(self, input: Tensor, other: Tensor) -> Tensor:
         u, v = input, other
         combined = torch.cat(tensors=[u, v, torch.abs(u - v), u * v], dim=-1)
-        x = self.classifier(combined)
+        x = self.linear(combined)
         if not self.return_logits:
             x = self.act(x)
         return x

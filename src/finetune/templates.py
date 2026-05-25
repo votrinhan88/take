@@ -1,17 +1,7 @@
-import os
-import sys
-
-repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-if sys.path[0] != repo_path:
-    sys.path.insert(0, repo_path)
-
-
+import re
 from typing import overload
 
-import re
-
-from utils.metadata import DatasetMetadata
+from src.metadata import DatasetMetadata
 
 
 class TextTemplate:

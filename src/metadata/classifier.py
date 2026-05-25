@@ -1,5 +1,7 @@
 class ClassifierMetadata:
     supported = ["logistic", "nbayes", "svm", "textcnn", "textrnn", "siamlog"]
+    supported_cls = ["logistic", "nbayes", "svm", "textcnn", "textrnn"]
+    supported_nli = ["siamlog"]
 
     def __init__(self, model: str):
         self.model = self._validate_args("model", model)
@@ -13,32 +15,33 @@ class ClassifierMetadata:
 
     def get_preset(self) -> dict:
         if self.model == "logistic":
-            preset_metadata = {
+            return {
                 "abbrev": "logistic",
+                "task": "cls",
                 "Class": "eval:LogisticRegression",
                 "kwargs": {"loss_fn": "ce", "return_logits": True},
             }
-            return preset_metadata
 
         elif self.model == "nbayes":
-            preset_metadata = {
+            return {
                 "abbrev": "nbayes",
+                "task": "cls",
                 "Class": "eval:NaiveBayes",
                 "kwargs": {"epsilon": 1e-8},
             }
-            return preset_metadata
 
         elif self.model == "svm":
-            preset_metadata = {
+            return {
                 "abbrev": "svm",
+                "task": "cls",
                 "Class": "eval:SupportVectorMachine",
                 "kwargs": {"loss_fn": "hinge"},
             }
-            return preset_metadata
 
         elif self.model == "textcnn":
-            preset_metadata = {
+            return {
                 "abbrev": "textcnn",
+                "task": "cls",
                 "Class": "eval:TextCNN",
                 "kwargs": {
                     "num_channels": 100,
@@ -49,11 +52,11 @@ class ClassifierMetadata:
                     "loss_fn": "ce",
                 },
             }
-            return preset_metadata
 
         elif self.model == "textrnn":
-            preset_metadata = {
+            return {
                 "abbrev": "textrnn",
+                "task": "cls",
                 "Class": "eval:TextRNN",
                 "kwargs": {
                     "hidden_dim": 100,
@@ -65,15 +68,14 @@ class ClassifierMetadata:
                     "loss_fn": "ce",
                 },
             }
-            return preset_metadata
 
         elif self.model == "siamlog":
-            preset_metadata = {
+            return {
                 "abbrev": "siamlog",
+                "task": "nli",
                 "Class": "eval:SiameseLogistic",
                 "kwargs": {"loss_fn": "ce", "return_logits": True},
             }
-            return preset_metadata
 
         else:
             raise ValueError(f"Model {self.model} not supported.")

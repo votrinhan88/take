@@ -2,10 +2,10 @@ from sklearn.naive_bayes import MultinomialNB
 import torch
 from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
-import lightning as L
+from pytorch_lightning.core.module import LightningModule
 
 
-class NaiveBayes(L.LightningModule):
+class NaiveBayes(LightningModule):
     """Naive Bayes Classifier.
 
     Args:
@@ -114,7 +114,7 @@ class NaiveBayes(L.LightningModule):
         }
 
 
-class GaussianNaiveBayes(L.LightningModule):
+class GaussianNaiveBayes(LightningModule):
     mu: nn.Parameter
     sigma: nn.Parameter
     log_prior: nn.Parameter

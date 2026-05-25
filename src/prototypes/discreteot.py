@@ -1,23 +1,16 @@
 import os
-import sys
-
-repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-if sys.path[0] != repo_path:
-    sys.path.insert(0, repo_path)
 
 import numpy as np
+import ot
 import torch
 from torch import nn, Tensor
 import tqdm.auto as tqdm
-from sklearn.neighbors import BallTree
 from sentence_transformers import SentenceTransformer
-import ot
 
-from models.prototypes.kmeans import KMeansPlusPlus, KMeansClassifier
-from utils.pythonic.numeric_utils import set_difference, set_intersection
-from models.diversity.similarity import CosineDissimilarity, CDist
-from models.influence.fisher import FisherScorer
+from src.influence.fisher import FisherScorer
+from src.metrics.similarity import CosineDissimilarity, CDist
+from src.prototypes.kmeans import KMeansPlusPlus, KMeansClassifier
+from src.utils.pythonic.numeric_utils import set_difference, set_intersection
 
 
 class TemperatureScheduler:
@@ -37,10 +30,10 @@ class TemperatureScheduler:
         self.stop_temp = stop_temp
         self.strategy = strategy
 
-    def __call__(self, step: int, num_steps: int, progress: float | None = None) -> float:
-        step = np.clip(a=step, a_min=0, a_max=num_steps)
+    def __call__(self, step: int, n_steps: int, progress: float | None = None) -> float:
+        step = np.clip(a=step, a_min=0, a_max=n_steps)
         if progress is None:
-            progress = step / num_steps
+            progress = step / n_steps
 
         if self.strategy == "cosine":
             # Starts slow, drops fast in middle, settles slow
@@ -196,7 +189,9 @@ class DiscreteOTDistiller:
                     used.add(i.item())
                 else:
                     # Pick next nearest pool point
-                    sorted_dist = torch.argsort(distance.norm(p=2, dim=2)[:, idx.tolist().index(i.item())])
+                    sorted_dist = torch.argsort(
+                        distance.norm(p=2, dim=2)[:, idx.tolist().index(i.item())]
+                    )
                     for j in sorted_dist:
                         if j.item() not in used:
                             idx_unique.append(j.item())
@@ -210,11 +205,11 @@ class DiscreteOTDistiller:
         else:
             self.cost_fn = CDist(p=2, power=1)
 
-    def temperature(self, step: int, num_steps: int) -> float:
+    def temperature(self, step: int, n_steps: int) -> float:
         if self.temp_scheduler is None:
             return 1.0
         else:
-            return self.temp_scheduler(step, num_steps)
+            return self.temp_scheduler(step, n_steps)
 
     @staticmethod
     def compute_utility(pi: Tensor, C: Tensor) -> Tensor:
@@ -229,7 +224,7 @@ class DiscreteOTDistiller:
         utility = mass / (cost_per_src_obj + 1e-9)
         return utility
 
-    def stochastic_swap(self, step: int, num_steps: int):
+    def stochastic_swap(self, step: int, n_steps: int):
         N, M = self.source.shape[0], self.pool.shape[0]
 
         assert self.source_weights is not None, (
@@ -250,7 +245,7 @@ class DiscreteOTDistiller:
         utility = self.compute_utility(pi, cost_mat)  # [K]
 
         # Metropolis-Hastings swap
-        temperature = self.temperature(step, num_steps)
+        temperature = self.temperature(step, n_steps)
         p_swap = (-utility / temperature).softmax(dim=0)
         iidx_remove = torch.multinomial(
             input=p_swap, num_samples=self.batch_size, replacement=False
@@ -370,7 +365,7 @@ class DiscreteOTDistiller:
         best_cost = float("inf")
         best_indices = None
         for step in pbar:
-            cost_old, cost_new, accept = self.stochastic_swap(step=step, num_steps=num_epochs)
+            cost_old, cost_new, accept = self.stochastic_swap(step=step, n_steps=num_epochs)
             logs["cost_old"].append(cost_old)
             logs["cost_new"].append(cost_new)
             logs["accept"].append(accept)
@@ -419,8 +414,8 @@ class TemporalKernel:
         self.stop = stop
         self.strategy = strategy
 
-    def __call__(self, num_steps: int) -> Tensor:
-        progress = torch.linspace(start=0, end=1, steps=num_steps)
+    def __call__(self, n_steps: int) -> Tensor:
+        progress = torch.linspace(start=0, end=1, steps=n_steps)
 
         if self.strategy == "cosine":
             p2p = self.start - self.stop
@@ -430,13 +425,13 @@ class TemporalKernel:
         elif self.strategy == "linear":
             return self.start - progress * (self.start - self.stop)
         elif self.strategy == "constant":
-            return torch.ones(size=[num_steps]) * self.start
+            return torch.ones(size=[n_steps]) * self.start
         elif self.strategy == "first":
-            kernel = torch.zeros(size=[num_steps])
+            kernel = torch.zeros(size=[n_steps])
             kernel[0] = 1.0
             return kernel
         elif self.strategy == "last":
-            kernel = torch.zeros(size=[num_steps])
+            kernel = torch.zeros(size=[n_steps])
             kernel[-1] = 1.0
             return kernel
         else:
@@ -519,8 +514,8 @@ class TrajectoryAwareKnowledgeEstimator:
             "kwargs": {"lr": 0.003, "weight_decay": 5e-4},
         },
         batch_size: int = 128,
-        num_updates_per_step: int = 2,
-        num_steps: int = 50,
+        n_updates_per_step: int = 2,
+        n_steps: int = 50,
     ) -> Tensor:
         """Compute knowledge values.
 
@@ -528,8 +523,8 @@ class TrajectoryAwareKnowledgeEstimator:
         + `inputs`: Input data tensor of shape [N, *].
         + `targets`: Target labels tensor of shape [N].
         + `batch_size`: Batch size. Defaults to `128`.
-        + `num_updates_per_step`: Number of updates per step. Defaults to `2`.
-        + `num_steps`: Number of total steps. Defaults to `50`.
+        + `n_updates_per_step`: Number of updates per step. Defaults to `2`.
+        + `n_steps`: Number of total steps. Defaults to `50`.
         + `trajectory_dir`: Directory containing weights of model. If specified, will load weights \
             instead of updating model for the trajectory. Defaults to `None`.
         + `opt_kwargs`: Kwargs for optimizer. Defaults to \
@@ -543,8 +538,8 @@ class TrajectoryAwareKnowledgeEstimator:
             trajectory_dir=trajectory_dir,
             opt_kwargs=opt_kwargs,
             batch_size=batch_size,
-            num_updates_per_step=num_updates_per_step,
-            num_steps=num_steps,
+            n_updates_per_step=n_updates_per_step,
+            n_steps=n_steps,
         )
         knowledge = self.compute_knowledge_values(influence_matrix=influence_matrix)
         return knowledge
@@ -556,27 +551,27 @@ class TrajectoryAwareKnowledgeEstimator:
         trajectory_dir: str | None = None,
         opt_kwargs: dict = {},
         batch_size: int = 128,
-        num_updates_per_step: int = 2,
-        num_steps: int = 50,
+        n_updates_per_step: int = 2,
+        n_steps: int = 50,
     ) -> Tensor:
         preload_traj = isinstance(trajectory_dir, str)
         if preload_traj:
             print("`trajectory_dir` provided, will load model weights to compute knowledge.")
             weights_traj = [f for f in sorted(os.listdir(trajectory_dir)) if f.endswith(".pt")]
-            num_steps = len(weights_traj)  # Override
+            n_steps = len(weights_traj)  # Override
         else:
             print("`trajectory_dir` not provided, will train model to compute knowledge.")
             opt = opt_kwargs["Class"](params=self.model.parameters(), **opt_kwargs["kwargs"])
-            assert isinstance(num_steps, int), "num_steps must be an integer"
+            assert isinstance(n_steps, int), "n_steps must be an integer"
         assert isinstance(batch_size, int), "batch_size must be an integer"
-        assert isinstance(num_updates_per_step, int), "num_updates_per_step must be an integer"
+        assert isinstance(n_updates_per_step, int), "n_updates_per_step must be an integer"
 
-        infl_matrix = torch.zeros(size=[inputs.shape[0], num_steps])
+        infl_matrix = torch.zeros(size=[inputs.shape[0], n_steps])
         if self.verbose:
             pbar_desc = "TAKE | " + ("preload" if preload_traj else "train")
-            pbar = tqdm.tqdm(range(num_steps), desc=pbar_desc)
+            pbar = tqdm.tqdm(range(n_steps), desc=pbar_desc)
         else:
-            pbar = range(num_steps)
+            pbar = range(n_steps)
 
         for i in pbar:
             if preload_traj:
@@ -585,7 +580,7 @@ class TrajectoryAwareKnowledgeEstimator:
                     targets=targets,
                     path_weight=weights_traj[i],
                     batch_size=batch_size,
-                    num_updates_per_step=num_updates_per_step,
+                    n_updates_per_step=n_updates_per_step,
                 )
             else:
                 log = self.update_classifier_via_train(
@@ -593,7 +588,7 @@ class TrajectoryAwareKnowledgeEstimator:
                     targets=targets,
                     optimizer=opt,
                     batch_size=batch_size,
-                    num_updates_per_step=num_updates_per_step,
+                    n_updates_per_step=n_updates_per_step,
                 )
 
             fishr = FisherScorer(model=self.model, params_inf=self.params_inf, loss_fn=self.loss_fn)
@@ -609,12 +604,12 @@ class TrajectoryAwareKnowledgeEstimator:
         targets: Tensor,
         optimizer: torch.optim.Optimizer,
         batch_size: int,
-        num_updates_per_step: int,
+        n_updates_per_step: int,
     ) -> dict:
         acc = []
         losses = []
 
-        for _ in range(num_updates_per_step):
+        for _ in range(n_updates_per_step):
             batch_idx = torch.randperm(inputs.shape[0])[:batch_size]
             x = inputs[batch_idx]
             y = targets[batch_idx]
@@ -636,14 +631,14 @@ class TrajectoryAwareKnowledgeEstimator:
         targets: Tensor,
         path_weight: str,
         batch_size: int,
-        num_updates_per_step: int,
+        n_updates_per_step: int,
     ) -> dict:
         state_dict = torch.load(path_weight, map_location=self.device)
         self.model.load_state_dict(state_dict)
 
         acc = []
         losses = []
-        for _ in range(num_updates_per_step):
+        for _ in range(n_updates_per_step):
             batch_idx = torch.randperm(inputs.shape[0])[:batch_size]
             x = inputs[batch_idx]
             y = targets[batch_idx]
@@ -658,7 +653,7 @@ class TrajectoryAwareKnowledgeEstimator:
     def compute_knowledge_values(self, influence_matrix: Tensor) -> Tensor:
         knowledge = 1 / influence_matrix  # [N, T], high knowledge = low influence
         knowledge = knowledge / knowledge.sum(dim=0, keepdim=True)  # [N, T], normalize by samples
-        temporal = self.temporal_kernel(num_steps=influence_matrix.shape[1])  # [T]
+        temporal = self.temporal_kernel(n_steps=influence_matrix.shape[1])  # [T]
         knowledge = (knowledge * temporal.unsqueeze(dim=0)).sum(dim=1)  # [N], convolve by temporal
         knowledge = knowledge / knowledge.sum(dim=0)  # [N], normalize over samples
         return knowledge
@@ -669,7 +664,7 @@ if __name__ == "__main__":
 
     def expt_cluster_2D_fisher():
         from PIL import Image
-        from utils.data.synthetic import get_gaussian_clusters_2D
+        from src.utils.data.synthetic import get_gaussian_clusters_2D
 
         NUM_CLUSTERS = 4
         COLORS = ["red", "blue", "green", "magenta", "cyan"]
@@ -691,21 +686,19 @@ if __name__ == "__main__":
             nn.Linear(in_features=16, out_features=NUM_CLUSTERS),
         )
         take = TrajectoryAwareKnowledgeEstimator(model=model, params_inf=model[-1])
-        num_steps = 50
+        n_steps = 50
         infl_matrix = take.compute_influence_matrix(
             opt_kwargs={"Class": torch.optim.AdamW, "kwargs": {"lr": 0.01}},
             inputs=X_train,
             targets=y_train,
-            num_steps=num_steps,
+            n_steps=n_steps,
         )
         infl_matrix = infl_matrix / infl_matrix.sum(dim=0, keepdim=True)
 
         infl_matrix = infl_matrix.cpu().numpy()
-        for i in range(num_steps):
+        for i in range(n_steps):
             fig, ax = plt.subplots()
-            ax.set_title(
-                f"Fisher influence with {NUM_CLUSTERS} clusters, step {i + 1}/{num_steps}"
-            )
+            ax.set_title(f"Fisher influence with {NUM_CLUSTERS} clusters, step {i + 1}/{n_steps}")
             infl = infl_matrix[:, i]
             s = min_size + (infl - infl.min()) / (infl.max() - infl.min()) * (max_size - min_size)
             for k in range(NUM_CLUSTERS):
@@ -747,7 +740,7 @@ if __name__ == "__main__":
 
     def expt_sphere_2D_fisher():
         from PIL import Image
-        from utils.data.synthetic import get_gaussian_clusters_2D
+        from src.utils.data.synthetic import get_gaussian_clusters_2D
 
         NUM_CLUSTERS = 4
         COLORS = ["red", "blue", "green", "magenta", "cyan"]
@@ -771,9 +764,10 @@ if __name__ == "__main__":
             nn.Linear(in_features=16, out_features=NUM_CLUSTERS),
         )
         take = TrajectoryAwareKnowledgeEstimator(
-            model=model, params_inf=model[-1], 
+            model=model,
+            params_inf=model[-1],
         )
-        num_steps = 50
+        n_steps = 50
         infl_matrix = take.compute_influence_matrix(
             inputs=X_train,
             targets=y_train,
@@ -782,13 +776,11 @@ if __name__ == "__main__":
         infl_matrix = infl_matrix / infl_matrix.sum(dim=0, keepdim=True)
 
         infl_matrix = infl_matrix.cpu().numpy()
-        for i in range(num_steps):
+        for i in range(n_steps):
             # xy ratio = 1:1
             fig, ax = plt.subplots()
             ax.set_aspect("equal")
-            ax.set_title(
-                f"Fisher influence with {NUM_CLUSTERS} clusters, step {i + 1}/{num_steps}"
-            )
+            ax.set_title(f"Fisher influence with {NUM_CLUSTERS} clusters, step {i + 1}/{n_steps}")
             infl = infl_matrix[:, i]
             s = min_size + (infl - infl.min()) / (infl.max() - infl.min()) * (max_size - min_size)
             for k in range(NUM_CLUSTERS):
@@ -830,7 +822,7 @@ if __name__ == "__main__":
 
     def expt_cluster_2D_temporalkernel():
         from PIL import Image
-        from utils.data.synthetic import get_gaussian_clusters_2D
+        from src.utils.data.synthetic import get_gaussian_clusters_2D
 
         NUM_CLUSTERS = 4
         COLORS = ["red", "blue", "green", "magenta", "cyan"]
@@ -851,10 +843,7 @@ if __name__ == "__main__":
             nn.ReLU(),
             nn.Linear(in_features=16, out_features=NUM_CLUSTERS),
         )
-        take = TrajectoryAwareKnowledgeEstimator(
-            model=model,
-            params_inf=model[-1]
-        )
+        take = TrajectoryAwareKnowledgeEstimator(model=model, params_inf=model[-1])
         infl_matrix = take.compute_influence_matrix(
             inputs=X_train,
             targets=y_train,
@@ -895,7 +884,7 @@ if __name__ == "__main__":
     def expt_cluster_2D():
         import matplotlib.pyplot as plt
         from matplotlib.colors import ListedColormap
-        from utils.data.synthetic import get_gaussian_clusters_2D
+        from src.utils.data.synthetic import get_gaussian_clusters_2D
 
         NUM_CLUSTERS = 4
         K = 5
@@ -913,11 +902,11 @@ if __name__ == "__main__":
             nn.Linear(in_features=16, out_features=NUM_CLUSTERS),
         )
         # Evaluate influence matrix: influence over time
-        take = TrajectoryAwareKnowledgeEstimator(model=model,params_inf=model[-1])
+        take = TrajectoryAwareKnowledgeEstimator(model=model, params_inf=model[-1])
         knowledge_values = take(
             inputs=X_train,
             targets=y_train,
-            opt_kwargs={"Class": torch.optim.AdamW, "kwargs" : {"lr": 0.01}},
+            opt_kwargs={"Class": torch.optim.AdamW, "kwargs": {"lr": 0.01}},
         )
 
         # Use all points as pool, select K prototypes

@@ -1,86 +1,68 @@
+from __future__ import annotations
+
 from collections import Counter, defaultdict
 from copy import deepcopy
 import os
 import sys
 from typing import Callable
 
-import datasets
-from datasets import ClassLabel, Dataset, DatasetDict, concatenate_datasets
-import mauve
-import numpy as np
-from peft import LoraConfig, PeftModel
-from sentence_transformers import SentenceTransformer
-import torch
-from torch import Tensor
-import torch.nn as nn
-from transformers import (
-    AutoModel,
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    DataCollatorForLanguageModeling,
-)
-import tqdm.auto as tqdm
+repo_path = os.path.abspath(os.path.join(__file__, "../.."))
+assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
+if sys.path[0] != repo_path:
+    sys.path.insert(0, repo_path)
 
-sys.path.insert(0, os.path.abspath(os.path.join(__file__, "../..")))
+from src.metadata import ClassifierMetadata, DatasetMetadata, EncoderMetadata, LLMMetadata
+from expts.expt_utils import TypeArgparse
 
-from pipelines.classify import train_classifier
-from pipelines.expt_utils import (
-    get_dataset,
-    get_dataloader,
-    get_classifier,
-    get_encoder,
-    get_llm_model,
-    get_llm_tokenizer,
-)
-from src.models.classifiers import (
-    ClassifierMetadata,
-    ClassifierTrainer,
-    LogisticRegression,
-    SupportVectorMachine,
-    TextCNN,
-    TextRNN,
-)
-from src.metrics.infogain import (
-    DeterminantalPointProcess,
-    AverageSimilarityGain,
-    NearestNeighborDissimilarity,
-)
-from src.metrics.similarity import (
-    CosineSimilarity,
-    ExponentialCosineSimilarity,
-    NormalizedCosineSimilarity,
-    GeneralizedJaccardSimilarity,
-    InnerProductSimilarity,
-    JaccardSimilarity,
-    RBFKernelSimilarity,
-)
-from src.models.encoders import EncoderMetadata, E5Wrapper, MiniLMWrapper, JinaWrapper
-from src.influence import (
-    BatchUnpacker,
-    LiSSAInfluenceScorer,
-    JointMarginalInfluenceScorer,
-    ResidualInfluenceScorer,
-)
-from src.finetune.collators import ClosedEndedCollator
-from src.finetune.map_function import InstructionFinetuneMapFunction
-from src.models.llms import LLMMetadata
-from src.metrics import DistanceToClosestRecord, DistinctN, Perplexity, SelfBLEU
-from src.prototypes.discreteot import (
-    DiscreteOTDistiller,
-    TrajectoryAwareKnowledgeEstimator,
-    TemperatureScheduler,
-)
-from src.prototypes.kmeans import KMeansClassifier
-from src.utils.callbacks import PrintCallback
-from src.utils.metadata import DatasetMetadata
-from src.utils.pythonic.numeric_utils import balanced_partition, ensure_tensor
+
+def get_parser():
+    # fmt: off
+    import argparse
+    p = argparse.ArgumentParser()
+    g = p.add_argument_group("Metaconfig arguments")
+    g.add_argument("--base_config", type=str)
+    g.add_argument("--run", default=0)
+    g.add_argument("--n_runs", type=int, default=1)
+    g = p.add_argument_group("Dataset arguments")
+    g.add_argument("--dataset", type=str, required=True, choices=DatasetMetadata.supported)
+    g.add_argument("--dataset_path", type=str)
+    g.add_argument("--batch_size_encode", type=int)
+    g = p.add_argument_group("Models arguments")
+    g.add_argument("--llm", type=str, default="gemma3_270m", choices=LLMMetadata.supported)
+    g.add_argument("--encoder", type=str, default="minilm", choices=EncoderMetadata.supported)
+    g.add_argument("--influencer", type=str, choices=ClassifierMetadata.supported + [None])
+    g.add_argument("--take.n_updates_per_step", type=int)
+    g = p.add_argument_group("Condense arguments")
+    g.add_argument("--condense", type=str, default="discreteot", choices=["kmeans", "discreteot"])
+    g.add_argument("--add_train", type=TypeArgparse.bool_strict)
+    g.add_argument("--n_samples", type=int)
+    g.add_argument("--conditional", type=TypeArgparse.bool_strict)
+    g.add_argument("--export_csv", type=str)
+    g = p.add_argument_group("Evaluate arguments")
+    g.add_argument("--eval.classifier", type=str, choices=ClassifierMetadata.supported + [None])
+    g.add_argument("--eval.accuracy_state_dict", type=str)
+    g.add_argument("--eval.metrics", type=str)
+    g.add_argument("--eval.n_samples", type=TypeArgparse.bool_strict)
+    # fmt: on
+    return p
 
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class ConfigFactory:
-    supported_overrides = ["batch_size"]  # TODO
+    supported_overrides = [
+        "dataset_path",
+        "batch_size_encode",
+        "add_train",
+        "take.n_updates_per_step",
+        "n_samples",
+        "conditional",
+        "export_csv",
+        "eval.accuracy_state_dict",
+        "eval.metrics",
+        "eval.n_samples",
+    ]
 
     def __init__(self, **kwargs):
         self.args = kwargs
@@ -99,11 +81,13 @@ class ConfigFactory:
             self.influencer = self.args["influencer"]
             self.llm = self.args["llm"]
             self.condense = self.args["condense"]
+            self.eval_classifier = self.args.get("eval.classifier")
 
         # Metadata
         self.metadata_dataset = DatasetMetadata(dataset=self.dataset)
         self.metadata_encoder = EncoderMetadata(model=self.encoder)
-        self.metadata_influencer = ClassifierMetadata(model=self.influencer)
+        if self.influencer is not None:
+            self.metadata_influencer = ClassifierMetadata(model=self.influencer)
         self.metadata_llm = LLMMetadata(model=self.llm)
 
     def get_config(self) -> dict:
@@ -124,7 +108,7 @@ class ConfigFactory:
         self.metaconfig = {
             "name": f"cds-{self.dataset}-{self.llm}-{self.encoder}-{self.influencer}-{self.condense}",
             "expt": f"expt_{self.condense}",
-            "path": "./logs/condense",
+            "path": "./results/raw/condense",
             "args": self.args,
             "run": "eval:f'{run}'",
         }
@@ -136,6 +120,7 @@ class ConfigFactory:
             "imdb": ["train", "test"],
             "mnlim": ["train", "validation_matched", "validation_mismatched"],
             "qqp": ["train", "validation"],
+            "qnli": ["train", "validation"],
             "sst2": ["train", "validation"],
         }
         name_gen = f"gen-{self.dataset}-{self.llm}"
@@ -146,16 +131,15 @@ class ConfigFactory:
                 "pool": {
                     "init_with": "from_csv",
                     "from_csv_kwargs": {
-                        "path_or_paths": f"./logs/generate/{name_gen}/{name_gen}.csv",
+                        "path_or_paths": f"./results/processed/generate/{name_gen}/{name_gen}.csv",
                     },
                     "cast_label": True,
                 }
             },
             "cast_label": True,
             "preembed": True,
+            "batch_size_encode": 1000,
         }
-        if self.dataset in ["mnlim", "qqp", "sst2"]:
-            config["unify_text"] = True
         return config
 
     def get_config_models(self) -> dict:
@@ -173,28 +157,29 @@ class ConfigFactory:
             # Maybe a larger one also since minilm can only handle 256 first tokens
             raise ValueError(f"Unsupported encoder: {self.encoder}")
 
-        config["influencer"] = self.metadata_influencer.get_preset()
-        if self.influencer in ["logistic", "svm"]:
-            extra_kwargs = {
-                "input_dim": config["encoder"]["embed_dim"],
-                "num_classes": self.metadata_dataset.num_classes,
-            }
-            config["influencer"]["kwargs"].update(extra_kwargs)
-        elif self.influencer in ["textcnn", "textrnn"]:
-            extra_kwargs = {
-                "embed_dim": config["encoder"]["embed_dim"],
-                "num_classes": self.metadata_dataset.num_classes,
-            }
-            config["influencer"]["kwargs"].update(extra_kwargs)
-        else:
-            raise ValueError(f"Unsupported influencer: {self.influencer}")
+        if self.influencer is not None:
+            config["influencer"] = self.metadata_influencer.get_preset()
+            if self.influencer in ["logistic", "svm", "siamlog"]:
+                extra_kwargs = {
+                    "input_dim": config["encoder"]["embed_dim"],
+                    "num_classes": self.metadata_dataset.num_classes,
+                }
+                config["influencer"]["kwargs"].update(extra_kwargs)
+            elif self.influencer in ["textcnn", "textrnn"]:
+                extra_kwargs = {
+                    "embed_dim": config["encoder"]["embed_dim"],
+                    "num_classes": self.metadata_dataset.num_classes,
+                }
+                config["influencer"]["kwargs"].update(extra_kwargs)
+            else:
+                raise ValueError(f"Unsupported influencer: {self.influencer}")
 
         config["llm"] = {
             "model": {
                 "abbrev": self.llm,
                 **self.metadata_llm.get_preset_model(),
                 "load_state_dict": {
-                    "f": f"./logs/finetune/{self.dataset}-{self.llm}/lora.pt",
+                    "f": f"./results/raw/finetune/ftn-{self.dataset}-{self.llm}/lora.pt",
                     "weights_only": True,
                 },
             },
@@ -202,7 +187,9 @@ class ConfigFactory:
         }
 
         if self.condense == "discreteot":
-            lr = {"logistic": 3e-3, "svm": 3e-3, "textcnn": 3e-4, "textrnn": 3e-4}[self.influencer]
+            lr = {"logistic": 3e-3, "svm": 3e-3, "siamlog": 3e-3, "textcnn": 3e-4, "textrnn": 3e-4}[
+                self.influencer
+            ]
             config["take"] = {
                 "kwargs": {
                     "params_inf": "linear",  # linear for logistic, svm, textcnn, textrnn, ? albert
@@ -221,8 +208,8 @@ class ConfigFactory:
                         },
                     },
                     "batch_size": 128,
-                    "num_updates_per_step": 2,
-                    "num_steps": 50,
+                    "n_updates_per_step": 2,
+                    "n_steps": 50,
                 },
             }
         return config
@@ -269,9 +256,6 @@ class ConfigFactory:
     def get_config_evaluate(self) -> dict:
         config = {}
 
-        classifier = "logistic"
-        metadata_logistic = ClassifierMetadata(model=classifier)
-
         config.update({"metrics": "all", "n_samples": 1000, "verbose": True})
         config.update({"length": {}})
         config.update({"perplexity": {}})
@@ -280,101 +264,102 @@ class ConfigFactory:
         config.update({"dcr": {"splits": ["train", "condense:train", "test:train"]}})
         config.update({"mauve": {"splits": ["condense:train", "condense:test"]}})
 
-        config_accuracy_lgr = {
-            "dataset": {"loader_kwargs": {"batch_size": {"test": 256}, "num_workers": 4}},
-            "models": {
-                "classifier": {
-                    "abbrev": "logistic",
-                    "Class": "eval:LogisticRegression",
-                    "kwargs": {
-                        **metadata_logistic.get_preset()["kwargs"],
-                        "input_dim": self.metadata_encoder.get_preset()["embed_dim"],
-                        "num_classes": self.metadata_dataset.num_classes,
-                    },
-                    "load_state_dict": {
-                        "f": "./logs/classify/clf-logistic-tfidf-agnews/clf-logistic-tfidf-agnews - run 0.pt",
-                        "weights_only": True,
-                    },
-                }
-            },
-            "trainer": {
-                "fit_with": "clf_trainer",
-                "Class": "eval:ClassifierTrainer",
+        if self.eval_classifier is not None:
+            metadata_clf = ClassifierMetadata(model=self.eval_classifier)
+            clf_preset = metadata_clf.get_preset()
+            clf_model_config = {
+                **clf_preset,
                 "kwargs": {
-                    "loss_fn": "eval:torch.nn.CrossEntropyLoss()",
-                    "num_classes": 4,
+                    **clf_preset["kwargs"],
+                    "input_dim": self.metadata_encoder.get_preset()["embed_dim"],
+                    "num_classes": self.metadata_dataset.num_classes,
                 },
-                "L_trainer_kw": {
-                    "enable_checkpointing": False,
-                    "enable_progress_bar": False,
-                    "logger": False,
-                },
-            },
-        }
-        config.update({"accuracy_lgr": config_accuracy_lgr})
+            }
 
-        config_utility_lgr = {
-            "dataset": {
-                "loader_kwargs": {
-                    "batch_size": {"train": 2, "test": 256},
-                    "shuffle": {"train": True},
-                    "num_workers": 4,
+            clf_expt = "eval_nli" if self.dataset in DatasetMetadata.supported_nli else "eval_cls"
+            clf_name = f"clf-{self.dataset}-{self.eval_classifier}-{self.encoder}"
+            acc_state_dict = f"./results/processed/{clf_expt}/{clf_name}/{clf_name}.pt"
+            config_accuracy_lgr = {
+                "dataset": {"loader_kwargs": {"batch_size": {"test": 256}, "num_workers": 4}},
+                "models": {
+                    "classifier": {
+                        **clf_model_config,
+                        "load_state_dict": {"f": acc_state_dict, "weights_only": True},
+                    }
                 },
-            },
-            "models": {
-                "classifier": {
-                    "abbrev": "logistic",
-                    "Class": "eval:LogisticRegression",
+                "trainer": {
+                    "fit_with": "clf_trainer",
+                    "Class": "eval:ClassifierTrainer",
                     "kwargs": {
-                        **metadata_logistic.get_preset()["kwargs"],
-                        "input_dim": self.metadata_encoder.get_preset()["embed_dim"],
-                        "num_classes": self.metadata_dataset.num_classes,
+                        "loss_fn": "eval:torch.nn.CrossEntropyLoss()",
+                        "num_classes": 4,
                     },
-                }
-            },
-            "trainer": {
-                "fit_with": "clf_trainer",
-                "Class": "eval:ClassifierTrainer",
-                "kwargs": {
-                    "loss_fn": "eval:torch.nn.CrossEntropyLoss()",
-                    "optimizer_kw": {
-                        "Class": "eval:torch.optim.AdamW",
-                        "kwargs": {"lr": 0.003, "weight_decay": 0.0005},
+                    "L_trainer_kw": {
+                        "enable_checkpointing": False,
+                        "enable_progress_bar": False,
+                        "logger": False,
                     },
-                    "num_classes": 4,
                 },
-                "L_trainer_kw": {
-                    "callbacks": {"printer": {"on_event": "train_epoch_end"}},
-                    "check_val_every_n_epoch": 1,
-                    "enable_checkpointing": False,
-                    "enable_progress_bar": False,
-                    "max_epochs": 20,
-                    "logger": False,
+            }
+            config.update({"accuracy_lgr": config_accuracy_lgr})
+
+            config_utility_lgr = {
+                "dataset": {
+                    "loader_kwargs": {
+                        "batch_size": {"train": 2, "test": 256},
+                        "shuffle": {"train": True},
+                        "num_workers": 4,
+                    },
                 },
-                "fit_kw": {},
-            },
-        }
-        config.update({"utility_lgr": config_utility_lgr})
+                "models": {
+                    "classifier": clf_model_config,
+                },
+                "trainer": {
+                    "fit_with": "clf_trainer",
+                    "Class": "eval:ClassifierTrainer",
+                    "kwargs": {
+                        "loss_fn": "eval:torch.nn.CrossEntropyLoss()",
+                        "optimizer_kw": {
+                            "Class": "eval:torch.optim.AdamW",
+                            "kwargs": {"lr": 0.003, "weight_decay": 0.0005},
+                        },
+                        "num_classes": 4,
+                    },
+                    "L_trainer_kw": {
+                        "callbacks": {"printer": {"on_event": "train_epoch_end"}},
+                        "check_val_every_n_epoch": 1,
+                        "enable_checkpointing": False,
+                        "enable_progress_bar": False,
+                        "max_epochs": 20,
+                        "logger": False,
+                    },
+                    "fit_kw": {},
+                },
+            }
+            config.update({"utility_lgr": config_utility_lgr})
 
         return config
 
     def override_config(self, config: dict, **kwargs) -> dict:
-        keys_avail = []
         for k, v in self.override_args.items():
-            assert k in keys_avail, f"Unknown key: {k}"
-
-            if k == "dataset_path":
+            if k == "batch_size_encode":
+                config["dataset"]["batch_size_encode"] = v
+            elif k == "dataset_path":
                 config["dataset"]["splits_custom"]["pool"]["from_csv_kwargs"]["path_or_paths"] = v
             elif k == "add_train":
                 config["condense"]["add_train"].append(v)
-            elif k == "take.num_updates_per_step":
-                config["take"]["kwargs_call"]["num_updates_per_step"] = v
+            elif k == "take.n_updates_per_step":
+                config["take"]["kwargs_call"]["n_updates_per_step"] = v
             elif k == "n_samples":
                 config["condense"]["n_samples"] = v
             elif k == "conditional":
                 config["condense"]["conditional"] = v
             elif k == "export_csv":
-                config["condense"]["export_csv"] = v
+                name = config["metaconfig"]["name"]
+                if v.endswith(".csv"):
+                    config["condense"]["export_csv"] = v
+                else:
+                    config["condense"]["export_csv"] = f"eval:f'{v}/{name}-run={{run}}.csv'"
             elif k == "eval.metrics":
                 list_metrics = list(v.split(","))
                 config["evaluate"]["metrics"] = list_metrics
@@ -406,7 +391,7 @@ class ConfigFactory:
             yaml.dump(data=self.config, stream=f, sort_keys=False)
 
         if verbose:
-            print(f"Config exported to {path_config}.")
+            print(f"Exported config to {path_config}.")
 
         return path_config
 
@@ -416,14 +401,21 @@ def preprocess_dataset(dataset: DatasetDict, encoder, config: dict) -> DatasetDi
 
     if config["abbrev"] == "mnlim":
         dataset["test"] = dataset.pop("validation_matched")
-    elif config["abbrev"] in ["qqp", "sst2"]:
+    elif config["abbrev"] in ["qqp", "qnli", "sst2"]:
         dataset["test"] = dataset.pop("validation")
 
-    if config.get("unify_text") is not None:
+    if config["abbrev"] in DatasetMetadata.requires_unify_map:
         map_fn, map_kwargs = metadata.get_unify_map()
         dataset = dataset.map(map_fn, **map_kwargs)
 
     if config.get("cast_label") is not None:
+        if "pool" in dataset:
+
+            def str_label_to_int(batch):
+                batch["label"] = metadata.label_2_idx(batch["label"])
+                return batch
+
+            dataset["pool"] = dataset["pool"].map(str_label_to_int, batched=True)
         dataset = dataset.cast_column(column="label", feature=ClassLabel(names=metadata.classes))
 
     if config.get("preembed") is True:
@@ -433,7 +425,9 @@ def preprocess_dataset(dataset: DatasetDict, encoder, config: dict) -> DatasetDi
             return batch
 
         assert encoder is not None, "Encoder must be provided for pre-embedding the dataset."
-        dataset = dataset.map(function=preembed, batched=True, batch_size=4)
+        dataset = dataset.map(
+            function=preembed, batched=True, batch_size=config["batch_size_encode"]
+        )
 
     if config.get("add_train") is True:
         dataset["pool"] = concatenate_datasets([dataset["pool"], dataset["train"]])
@@ -462,7 +456,6 @@ def evaluate_dataset(config: dict | None, dataset: DatasetDict, llm, tokenizer) 
         for split in dataset.keys()
     }
 
-    # TODO: Add DDP
     metrics = {}
     if "length" in config["metrics"]:
         metrics["length"] = {}
@@ -586,7 +579,13 @@ def export_dataset(
     for col_name in remove_columns:
         if col_name in dataset.column_names:
             dataset = dataset.remove_columns(column_names=[col_name])
-    dataset = dataset.sort(column_names=["label", "text"])
+
+    if metadata.dataset in DatasetMetadata.requires_unify_map:
+        inv_map_fn, inv_map_kwargs = metadata.get_unify_map(inverse=True)
+        dataset = dataset.map(inv_map_fn, **inv_map_kwargs)
+
+    columns = ["label"] + metadata.text_keys
+    dataset = dataset.sort(column_names=["label", metadata.text_keys[0]])
 
     def map_fn(batch: dict) -> dict:
         batch["label_str"] = metadata.idx_2_label(batch["label"].tolist())
@@ -595,7 +594,7 @@ def export_dataset(
     dataset = dataset.map(function=map_fn)
     dataset = dataset.remove_columns(column_names=["label"])
     dataset = dataset.rename_column(original_column_name="label_str", new_column_name="label")
-    dataset = dataset.select_columns(["label", "text"])
+    dataset = dataset.select_columns(columns)
 
     if verbose:
         print(f"Condensed dataset class distribution: {Counter(dataset['label'])}")
@@ -747,37 +746,81 @@ def get_expt(expt: str) -> Callable:
 
 
 if __name__ == "__main__":
-    import argparse
+    import datasets
+    from datasets import ClassLabel, Dataset, DatasetDict, concatenate_datasets
+    import mauve
+    import numpy as np
+    from peft import LoraConfig, PeftModel
+    from sentence_transformers import SentenceTransformer
+    import torch
+    from torch import Tensor
+    import torch.nn as nn
+    from transformers import (
+        AutoModel,
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        DataCollatorForLanguageModeling,
+    )
+    import tqdm.auto as tqdm
     import yaml
 
-    from expts.expt_utils import ConfigParser, TypeArgparse, pprint, rename_runs
+    from expts.eval_cls import train_classifier
+    from expts.expt_utils import (
+        ConfigParser,
+        TypeArgparse,
+        get_dataset,
+        get_dataloader,
+        get_classifier,
+        get_encoder,
+        get_llm_model,
+        get_llm_tokenizer,
+        pprint,
+        rename_runs,
+    )
+    from src.models.classifiers import (
+        ClassifierTrainer,
+        LogisticRegression,
+        SiameseLogistic,
+        SupportVectorMachine,
+        TextCNN,
+        TextRNN,
+    )
+    from src.metrics.infogain import (
+        DeterminantalPointProcess,
+        AverageSimilarityGain,
+        NearestNeighborDissimilarity,
+    )
+    from src.metrics.similarity import (
+        CosineSimilarity,
+        ExponentialCosineSimilarity,
+        NormalizedCosineSimilarity,
+        GeneralizedJaccardSimilarity,
+        InnerProductSimilarity,
+        JaccardSimilarity,
+        RBFKernelSimilarity,
+    )
+    from src.models.encoders import E5Wrapper, MiniLMWrapper, JinaWrapper
+    from src.influence import BatchUnpacker, LiSSAInfluenceScorer
+    from src.finetune.collators import ClosedEndedCollator
+    from src.finetune.map_function import InstructionFinetuneMapFunction
+    from src.metrics import DistanceToClosestRecord, DistinctN, Perplexity, SelfBLEU
+    from src.prototypes.discreteot import (
+        DiscreteOTDistiller,
+        TrajectoryAwareKnowledgeEstimator,
+        TemperatureScheduler,
+    )
+    from src.prototypes.kmeans import KMeansClassifier
+    from src.utils.callbacks import PrintCallback
+    from src.utils.pythonic.numeric_utils import balanced_partition, ensure_tensor
 
-    # fmt: off
-    args = argparse.ArgumentParser()
-    args_group = args.add_argument_group("Metaconfig arguments")
-    args_group.add_argument("--base_config", type=str)
-    args_group.add_argument("--run", type=TypeArgparse.int_or_str, default=0)
-    args_group.add_argument("--n_runs", type=int, default=1)
-    args_group = args.add_argument_group("Dataset arguments")
-    args_group.add_argument("--dataset", type=str, required=True, choices=DatasetMetadata.supported)
-    args_group.add_argument("--dataset_path", type=str)
-    args_group = args.add_argument_group("Models arguments")
-    args_group.add_argument("--llm", type=str, default="gemma3_270m", choices=LLMMetadata.supported)
-    args_group.add_argument("--encoder", type=str, default="minilm", choices=EncoderMetadata.supported)
-    args_group.add_argument("--influencer", type=str, default="logistic", choices=ClassifierMetadata.supported)
-    args_group.add_argument("--take.num_updates_per_step", type=int)
-    args_group = args.add_argument_group("Condense arguments")
-    args_group.add_argument("--condense", type=str, default="discreteot", choices=["kmeans", "discreteot"])
-    args_group.add_argument("--add_train", type=TypeArgparse.bool_strict)
-    args_group.add_argument("--n_samples", type=int)
-    args_group.add_argument("--conditional", type=TypeArgparse.bool_strict)
-    args_group.add_argument("--export_csv", type=str)
-    args_group = args.add_argument_group("Evaluate arguments")
-    args_group.add_argument("--eval.metrics", type=str)
-    args_group.add_argument("--eval.n_samples", type=TypeArgparse.bool_strict)
+    args = get_parser()
+    for action in args._actions:
+        if action.dest == "run":
+            action.type = TypeArgparse.int_or_str
+            break
     args = args.parse_args()
     custom_args = {k: v for k, v in vars(args).items() if v is not None}
-    # fmt: on
+
     parser = ConfigParser(globals=globals(), locals=locals())
     config_factory = ConfigFactory(**custom_args)
     config = config_factory.get_config()

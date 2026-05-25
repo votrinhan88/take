@@ -1,21 +1,38 @@
+from __future__ import annotations
+
 from copy import deepcopy
 import csv
 import os
 import sys
 
-from datasets import Dataset
-import tqdm.auto as tqdm
-from transformers import GenerationConfig, AutoModelForCausalLM, AutoTokenizer
-import yaml
+repo_path = os.path.abspath(os.path.join(__file__, "../.."))
+assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
+if sys.path[0] != repo_path:
+    sys.path.insert(0, repo_path)
 
-sys.path.insert(0, os.path.abspath(os.path.join(__file__, "../..")))
+from src.metadata import DatasetMetadata, LLMMetadata
 
-from pipelines.expt_utils import get_llm_model, get_llm_tokenizer
-from src.finetune.templates import TextTemplate
-from src.generate.utils import generate
-from src.models.llms.metadata import LLMMetadata
-from src.utils.metadata import DatasetMetadata
-from src.utils.pythonic.numeric_utils import balanced_partition
+
+def get_parser():
+    # fmt: off
+    import argparse
+    p = argparse.ArgumentParser()
+    g = p.add_argument_group("Metaconfig arguments")
+    g.add_argument("--base_config", type=str)
+    g.add_argument("--run", default=0)
+    g.add_argument("--n_runs", type=int, default=1)
+    g = p.add_argument_group("Dataset arguments")
+    g.add_argument("--dataset", type=str, choices=DatasetMetadata.supported)
+    g = p.add_argument_group("Model arguments")
+    g.add_argument("--model", type=str, choices=LLMMetadata.supported)
+    g.add_argument("--load_state_dict", type=str)
+    g = p.add_argument_group("Generation arguments")
+    g.add_argument("--conditional", type=bool)
+    g.add_argument("--num_samples", type=int)
+    g.add_argument("--export_csv", type=str)
+    g.add_argument("--export_hfds", type=str)
+    # fmt: on
+    return p
 
 
 class ConfigFactory:
@@ -64,7 +81,7 @@ class ConfigFactory:
         self.metaconfig = {
             "name": f"gen-{self.dataset}-{self.model}",
             "expt": "gen",
-            "path": "./logs/generate",
+            "path": "./results/raw/generate",
             "args": self.args,
             "run": "eval:f'{run}'",
         }
@@ -80,7 +97,7 @@ class ConfigFactory:
                 "abbrev": self.model,
                 **self.metadata_llm.get_preset_model(),
                 "load_state_dict": {
-                    "f": f"./logs/finetune/{self.dataset}-{self.model}/lora.pt",
+                    "f": f"./results/raw/finetune/ftn-{self.dataset}-{self.model}/lora.pt",
                     "weights_only": True,
                 },
             },
@@ -115,12 +132,7 @@ class ConfigFactory:
         }
         return config
 
-    def override_config(self, config: dict, **kwargs) -> dict:
-        name = (
-            config["metaconfig"]["name"]
-            if "metaconfig" in config
-            else f"gen-{self.args['dataset']}-{self.args['model']}"
-        )
+    def override_config(self, config: dict, **_) -> dict:
         for k, v in self.override_args.items():
             if k == "load_state_dict":
                 config["models"]["model"]["load_state_dict"]["f"] = v
@@ -152,10 +164,9 @@ class ConfigFactory:
             yaml.dump(data=self.config, stream=f, sort_keys=False)
 
         if verbose:
-            print(f"Config exported to {path_config}.")
+            print(f"Exported config to {path_config}.")
 
         return path_config
-
 
 
 class DatasetExporter:
@@ -281,26 +292,29 @@ def expt_generate(config: dict, run: int | str = 0):
 
 
 if __name__ == "__main__":
-    import argparse
-    from expts.expt_utils import ConfigParser, TypeArgparse, pprint, rename_runs
+    from datasets import Dataset
+    import tqdm.auto as tqdm
+    from transformers import GenerationConfig, AutoModelForCausalLM, AutoTokenizer
+    import yaml
 
-    # fmt: off
-    parser = argparse.ArgumentParser()
-    args_group = parser.add_argument_group("Metaconfig arguments")
-    args_group.add_argument("--base_config", type=str)
-    args_group.add_argument("--run", type=TypeArgparse.int_or_str, default=0)
-    args_group.add_argument("--n_runs", type=int, default=1)
-    args_group = parser.add_argument_group("Dataset arguments")
-    args_group.add_argument("--dataset", type=str, choices=DatasetMetadata.supported)
-    args_group = parser.add_argument_group("Model arguments")
-    args_group.add_argument("--model", type=str, choices=LLMMetadata.supported)
-    args_group.add_argument("--load_state_dict", type=str)
-    args_group = parser.add_argument_group("Generation arguments")
-    args_group.add_argument("--conditional", type=bool)
-    args_group.add_argument("--num_samples", type=int)
-    args_group.add_argument("--export_csv", type=str)
-    args_group.add_argument("--export_hfds", type=str)
-    args = parser.parse_args()
+    from expts.expt_utils import (
+        ConfigParser,
+        TypeArgparse,
+        get_llm_model,
+        get_llm_tokenizer,
+        pprint,
+        rename_runs,
+    )
+    from src.finetune.templates import TextTemplate
+    from src.generate.utils import generate
+    from src.utils.pythonic.numeric_utils import balanced_partition
+
+    args = get_parser()
+    for action in args._actions:
+        if action.dest == "run":
+            action.type = TypeArgparse.int_or_str
+            break
+    args = args.parse_args()
     custom_args = {
         k: getattr(args, k)
         for k in [
@@ -311,7 +325,6 @@ if __name__ == "__main__":
         ]
         if getattr(args, k) is not None
     }
-    # fmt: on
 
     parser = ConfigParser(globals=globals(), locals=locals())
     config_factory = ConfigFactory(**custom_args)

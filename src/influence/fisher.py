@@ -46,7 +46,7 @@ class FisherScorer:
         self.model = model
         self.params_inf = params_inf if params_inf is not None else model
         self.batch_size = batch_size
-        self.loss_fn = nn.CrossEntropyLoss(reduction="mean") if loss_fn == "ce" else loss_fn
+        self._loss_fn: nn.Module = nn.CrossEntropyLoss(reduction="mean") if loss_fn == "ce" else loss_fn
         self.use_goodfellow_trick = use_goodfellow_trick
 
         self.params_dict = dict(self.params_inf.named_parameters())
@@ -65,11 +65,11 @@ class FisherScorer:
 
             # Goodfellow trick strictly requires a loss function where the per-sample gradient can
             # be expressed as an outer product of the input and output gradients.
-            assert isinstance(self.loss_fn, self.supported_losses), (
+            assert isinstance(self._loss_fn, self.supported_losses), (
                 f"Goodfellow trick only supports {self.supported_losses}."
             )
             # Mean reduction is required to ensure the output gradients are properly scaled for this identity to hold.
-            assert self.loss_fn.reduction == "mean", (
+            assert self._loss_fn.reduction == "mean", (
                 "Goodfellow trick requires 'mean' reduction for loss function."
             )
 
@@ -98,7 +98,7 @@ class FisherScorer:
             bs = bx.shape[0]
 
             self.model.zero_grad()
-            loss = self.loss_fn(self.model(bx), by)
+            loss = self._loss_fn(self.model(bx), by)
             loss.backward()
 
             b_sq_norms = torch.zeros(bs, device=device)
@@ -123,7 +123,7 @@ class FisherScorer:
 
         def compute_loss(params, x, y):
             out = functional_call(self.model, params, x.unsqueeze(0))
-            return self.loss_fn(out, y.unsqueeze(0))
+            return self._loss_fn(out, y.unsqueeze(0))
 
         grad_fn = grad(compute_loss, argnums=0)
         batched_grad_fn = vmap(grad_fn, in_dims=(None, 0, 0))

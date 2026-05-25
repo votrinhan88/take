@@ -278,72 +278,42 @@ class LiSSAInfluenceScorer(nn.Module):
 
 
 if __name__ == "__main__":
-    import torchvision
-    import torchvision.transforms as transforms
-    import torch.nn.functional as F
-    from torch.utils.data import DataLoader, Subset, random_split
-
-    class LeNet5(nn.Module):
-        def __init__(self):
-            super(LeNet5, self).__init__()
-            self.conv1 = nn.Conv2d(1, 6, 5)
-            self.conv2 = nn.Conv2d(6, 16, 5)
-            self.fc1 = nn.Linear(16 * 4 * 4, 120)
-            self.fc2 = nn.Linear(120, 84)
-            self.fc3 = nn.Linear(84, 10)
-
-        def forward(self, x):
-            x = F.max_pool2d(F.relu(self.conv1(x)), (2, 2))
-            x = F.max_pool2d(F.relu(self.conv2(x)), 2)
-            x = x.view(-1, 16 * 4 * 4)
-            x = F.relu(self.fc1(x))
-            x = F.relu(self.fc2(x))
-            x = self.fc3(x)
-            return x
+    from torch.utils.data import DataLoader, TensorDataset
 
     def test_LiSSA():
-        print("Running LeNet5 MNIST influence test...")
+        print("Running LiSSA influence test on synthetic text embeddings...")
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # 1. Load MNIST
-        train_set = torchvision.datasets.MNIST(
-            root="./datasets/MNIST/",
-            train=True,
-            download=True,
-            transform=transforms.ToTensor(),
-        )
-        test_set = torchvision.datasets.MNIST(
-            root="./datasets/MNIST/",
-            train=False,
-            download=True,
-            transform=transforms.ToTensor(),
-        )
+        # Synthetic: 512-dim embeddings, 4-class classification
+        n_train, n_val, n_test = 512, 64, 32
+        embed_dim, n_classes = 512, 4
+        torch.manual_seed(0)
+        X_train = torch.randn(n_train, embed_dim)
+        y_train = torch.randint(0, n_classes, (n_train,))
+        X_val   = torch.randn(n_val, embed_dim)
+        y_val   = torch.randint(0, n_classes, (n_val,))
+        X_test  = torch.randn(n_test, embed_dim)
+        y_test  = torch.randint(0, n_classes, (n_test,))
 
-        # Subsample for speed in this test
-        train_subset, _ = random_split(train_set, [1000, len(train_set) - 1000])
-        test_subset, _ = random_split(test_set, [100, len(test_set) - 100])
-        trainloader = DataLoader(train_subset, batch_size=32, shuffle=True)
-        testloader = DataLoader(test_subset, batch_size=32, shuffle=False)
+        trainloader = DataLoader(TensorDataset(X_train, y_train), batch_size=32, shuffle=True)
+        valloader   = DataLoader(TensorDataset(X_val,   y_val),   batch_size=32)
+        testloader  = DataLoader(TensorDataset(X_test,  y_test),  batch_size=32)
 
-        # 2. Train Model (Pretrain)
-        print("Training LeNet5...")
-        model = LeNet5().to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        model = nn.Sequential(
+            nn.Linear(embed_dim, 128), nn.ReLU(), nn.Linear(128, n_classes)
+        ).to(device)
         loss_fn = nn.CrossEntropyLoss()
 
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         model.train()
-        for epoch in range(2):  # Short training
-            for inputs, targets in trainloader:
-                inputs, targets = inputs.to(device), targets.to(device)
+        for _ in range(3):
+            for xb, yb in trainloader:
+                xb, yb = xb.to(device), yb.to(device)
                 optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = loss_fn(outputs, targets)
-                loss.backward()
+                loss_fn(model(xb), yb).backward()
                 optimizer.step()
         print("Training done.")
 
-        # 3. Compute Influence
-        print("Computing Influence...")
         scorer = LiSSAInfluenceScorer(
             model=model,
             loss_fn=loss_fn,
@@ -352,16 +322,13 @@ if __name__ == "__main__":
             scale=0.001,
             damping=0.01,
         )
-        scorer.fit(trainloader, testloader)
-
+        scorer.fit(trainloader, valloader)
         print(f"Val grads shape: {scorer.grad_val.shape}")
         print(f"IHVP shape: {scorer.h_val.shape}")
 
-        # Check influence of first batch of training data
-        batch = next(iter(trainloader))
-        print("Computing influence scores for candidate batch...")
+        batch = next(iter(testloader))
         scores = scorer(batch)
-        print("Influence Scores (first 5):", scores[:5])
+        print("Influence scores (first 5):", scores[:5])
         print("Done.")
 
     test_LiSSA()

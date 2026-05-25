@@ -2,10 +2,10 @@ import types
 from typing import Callable, Optional, Any, Sequence
 
 import numpy as np
-import lightning as L
+import pytorch_lightning as pl
 
 
-class PrintCallback(L.Callback):
+class PrintCallback(pl.Callback):
     """Print a progress bar to screen. Included in trainers by default.
 
     Args:
@@ -24,7 +24,7 @@ class PrintCallback(L.Callback):
         # Dynamically bind the event method
         setattr(self, f"on_{self.event_name}", self._on_event)
 
-    def _on_event(self, trainer: L.Trainer, pl_module: L.LightningModule, *args, **kwargs):
+    def _on_event(self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs):
         metrics = trainer.callback_metrics
         if metrics is None:
             return

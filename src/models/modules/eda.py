@@ -11,7 +11,7 @@ import nltk
 from datasets import Dataset
 
 # Import nltk/wordnet data from the local directory
-path = "./nltk_data/"
+path = "./datasets/nltk_data/"
 if not os.path.exists(f"./{path}/corpora/wordnet.zip"):
     os.makedirs(path, exist_ok=True)
     nltk.download(info_or_id="wordnet", download_dir=path)
@@ -297,19 +297,24 @@ class EasyDataAugmentation(nn.Module):
                 "alpha_rs": self.alpha_rs,
                 "alpha_rd": self.alpha_rd,
             }
-        params.update({"num_aug": self.num_aug})
+        params.update(num_aug=self.num_aug)
         return ", ".join([f"{k}={v}" for k, v in params.items() if v is not None])
 
-    def augment_dataset(self, dataset: Dataset) -> Dataset:
-        dataset = dataset.map(
-            function=lambda batched: {
-                "text": self(batched["text"]),
-                "label": torch.repeat_interleave(
-                    input=batched["label"], repeats=torch.tensor([self.aug_factor])
-                ),
-            },
-            batched=True,
-        )
+    def augment_dataset(self, dataset: Dataset, text_keys: list[str] = ["text"]) -> Dataset:
+        repeats = torch.tensor([self.aug_factor])
+
+        def map_fn(batched):
+            result = {}
+            for k in dataset.column_names:
+                if k in text_keys:
+                    result[k] = self(batched[k])
+                else:
+                    result[k] = torch.repeat_interleave(
+                        input=torch.tensor(batched[k]), repeats=repeats
+                    )
+            return result
+
+        dataset = dataset.map(function=map_fn, batched=True)
         return dataset
 
 

@@ -1,6 +1,8 @@
 import torch
 from torch import Tensor
 
+from src.utils.typing import Tokenizer
+
 
 class TypeTokenRatio:
     """Type-Token Ratio = no. of unique tokens / total no. of tokens.
@@ -10,13 +12,13 @@ class TypeTokenRatio:
     + `tokenizer`: tokenizer.
     """
 
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer: Tokenizer):
         self.tokenizer = tokenizer
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.vocab_size = self.tokenizer.vocab_size
 
-    def __call__(self, texts: str | list[str]) -> dict[str, float | Tensor]:
+    def __call__(self, texts: str | list[str]) -> dict[str, Tensor]:
         if isinstance(texts, str):
             texts = [texts]
 
@@ -39,14 +41,6 @@ class TypeTokenRatio:
 
 
 if __name__ == "__main__":
-    import os
-    import sys
-
-    repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-    assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-    if sys.path[0] != repo_path:
-        sys.path.insert(0, repo_path)
-
     from transformers import AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(

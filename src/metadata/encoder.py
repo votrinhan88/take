@@ -18,7 +18,7 @@ class EncoderMetadata:
                 "Class": "eval:SentenceTransformer",
                 "kwargs": {
                     "model_name_or_path": "intfloat/e5-base-v2",
-                    "cache_folder": "./pretrained/encoders",
+                    "cache_folder": "./models/pretrained/encoders/",
                 },
                 "wrap": {"Class": "eval:E5Wrapper", "kwargs": {}},
                 "embed_dim": 768,
@@ -38,7 +38,7 @@ class EncoderMetadata:
                 "Class": "eval:AutoModel.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "jinaai/jina-embeddings-v5-text-nano",
-                    "cache_folder": "./pretrained/encoders",
+                    "cache_folder": "./models/pretrained/encoders/",
                     "trust_remote_code": True,
                     "dtype": "eval:torch.bfloat16",
                 },
@@ -52,7 +52,7 @@ class EncoderMetadata:
                 "Class": "eval:AutoModel.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "jinaai/jina-embeddings-v5-text-small",
-                    "cache_folder": "./pretrained/encoders",
+                    "cache_folder": "./models/pretrained/encoders/",
                     "trust_remote_code": True,
                     "dtype": "eval:torch.bfloat16",
                 },
@@ -66,7 +66,7 @@ class EncoderMetadata:
                 "Class": "eval:SentenceTransformer",
                 "kwargs": {
                     "model_name_or_path": "all-MiniLM-L6-v2",
-                    "cache_folder": "./pretrained/encoders/",
+                    "cache_folder": "./models/pretrained/encoders/",
                 },
                 "wrap": {"Class": "eval:MiniLMWrapper", "kwargs": {}},
                 "embed_dim": 384,

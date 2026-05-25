@@ -93,6 +93,7 @@ class TextRNN(nn.Module):
 
         if mask is not None:
             lengths = mask.sum(dim=1).cpu()  # [B], true lengths
+            lengths[lengths == 0] = 1  # all-0 embedding for zero-length (OOV) sequences
             packed = pack_padded_sequence(input, lengths, batch_first=True, enforce_sorted=False)
             _, (hidden, _) = self.rnn(packed)  # [n_layers * n_dir, B, H]
         else:

@@ -1,28 +1,32 @@
+from __future__ import annotations
 from copy import deepcopy
 import os
 import sys
-from typing import Callable
-
-from datasets import concatenate_datasets, load_dataset, Dataset, DatasetDict
-import torch
-from torch import nn
-from torch.utils.data import DataLoader
 
 repo_path = os.path.abspath(os.path.join(__file__, "../.."))
 assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
 if sys.path[0] != repo_path:
     sys.path.insert(0, repo_path)
 
-from expts.expt_utils import get_dataset, get_dataloader, get_encoder
-from src.models.encoders import (
-    EncoderMetadata,
-    Tfidf,
-    GloVeEncoder,
-    E5Wrapper,
-    MiniLMWrapper,
-    JinaWrapper,
-)
-from src.utils.metadata import DatasetMetadata
+
+def get_parser():
+    import argparse
+    from src.metadata import EncoderMetadata, DatasetMetadata
+
+    p = argparse.ArgumentParser()
+    g = p.add_argument_group("Metaconfig arguments")
+    g.add_argument("--base_config", type=str)
+    g.add_argument("--run", default=0)
+    g.add_argument("--n_runs", type=int, default=1)
+    g = p.add_argument_group("Dataset arguments")
+    g.add_argument("--dataset", type=str, choices=DatasetMetadata.supported)
+    g.add_argument("--batch_size", type=int)
+    g = p.add_argument_group("Model arguments")
+    g.add_argument("--encoder", type=str, choices=EncoderMetadata.supported)
+    g.add_argument("--embed_dim", type=int)
+    g = p.add_argument_group("Embed arguments")
+    g.add_argument("--path_output", type=str)
+    return p
 
 
 class ConfigFactory:
@@ -93,7 +97,7 @@ class ConfigFactory:
             config["encoder"].update(
                 {
                     "fit_with": "self",
-                    "save_path": f"eval:f'./results/raw/embed/{name}/{name}-run={{run}}.pt'",
+                    "save_path": f"eval:f'./results/raw/embed/{name}/{name}-run={{run}}.pkl'",
                 }
             )
         return config
@@ -116,7 +120,7 @@ class ConfigFactory:
             elif k == "path_output":
                 if self.encoder == "tfidf":
                     config["models"]["encoder"]["save_path"] = (
-                        f"eval:f'{v}/{name}/{name}-run={{run}}.pt'"
+                        f"eval:f'{v}/{name}/{name}-run={{run}}.pkl'"
                     )
                 config["embed"]["path_output"] = f"eval:f'{v}/{name}/{name}-run={{run}}/'"
             else:
@@ -191,8 +195,9 @@ def expt_emb(config: dict, run: int | str):
     if hasattr(encoder, "embeddings"):
         print(f"Encoder {encoder} with embeddings {encoder.embeddings.shape}.")
     if config["models"]["encoder"].get("save_path"):
+        assert isinstance(encoder, Tfidf), "Only Tfidf encoder has save method."
         os.makedirs(os.path.dirname(config["models"]["encoder"]["save_path"]), exist_ok=True)
-        torch.save(obj=encoder.state_dict(), f=config["models"]["encoder"]["save_path"])
+        encoder.save(config["models"]["encoder"]["save_path"])
 
     def preembed(batch: dict) -> dict:
         batch["embeddings"] = encoder(batch["text"])
@@ -204,36 +209,44 @@ def expt_emb(config: dict, run: int | str):
 
 
 if __name__ == "__main__":
-    import argparse
     import yaml
+    from datasets import concatenate_datasets, Dataset, DatasetDict
+    import torch
+    from torch import nn
+    from torch.utils.data import DataLoader
+    from expts.expt_utils import (
+        ConfigParser,
+        TypeArgparse,
+        get_dataset,
+        get_dataloader,
+        get_encoder,
+        pprint,
+        rename_runs,
+    )
+    from src.metadata import DatasetMetadata, EncoderMetadata
+    from src.models.encoders import Tfidf, GloVeEncoder, E5Wrapper, MiniLMWrapper, JinaWrapper
 
-    from expts.expt_utils import ConfigParser, TypeArgparse, pprint, rename_runs
-
-    # fmt: off
-    args = argparse.ArgumentParser()
-    args_group = args.add_argument_group("Metaconfig arguments")
-    args_group.add_argument("--base_config", type=str)
-    args_group.add_argument("--run", type=TypeArgparse.int_or_str, default=0)
-    args_group.add_argument("--n_runs", type=int, default=1)
-    args_group = args.add_argument_group("Dataset arguments")
-    args_group.add_argument("--dataset", type=str, choices=DatasetMetadata.supported)
-    args_group.add_argument("--batch_size", type=int)
-    args_group = args.add_argument_group("Model arguments")
-    args_group.add_argument("--encoder", type=str, choices=EncoderMetadata.supported)
-    args_group.add_argument("--embed_dim", type=int)
-    args_group = args.add_argument_group("Embed arguments")
-    args_group.add_argument("--path_output", type=str)
+    args = get_parser()
+    for action in args._actions:
+        if action.dest == "run":
+            action.type = TypeArgparse.int_or_str
+            break
     args = args.parse_args()
+
     custom_args = {
         k: getattr(args, k)
         for k in [
-            "base_config", "run", "n_runs",
-            "dataset", "batch_size",
-            "encoder", "embed_dim",
+            "base_config",
+            "run",
+            "n_runs",
+            "dataset",
+            "batch_size",
+            "encoder",
+            "embed_dim",
             "path_output",
         ]
-        if getattr(args, k) is not None}
-    # fmt: on
+        if getattr(args, k) is not None
+    }
 
     parser = ConfigParser(globals=globals(), locals=locals())
     config_factory = ConfigFactory(**custom_args)

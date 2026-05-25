@@ -3,10 +3,12 @@ from typing import Callable
 
 from transformers import GenerationConfig
 
+from src.utils.typing import Tokenizer
+
 
 def generate(
     model,
-    tokenizer,
+    tokenizer: Tokenizer,
     num_samples: int,
     prompt: str,
     genconfig: GenerationConfig,

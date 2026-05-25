@@ -73,19 +73,14 @@ class SelfBLEU:
 
 
 if __name__ == "__main__":
-    import os
-    import sys
     from transformers import AutoTokenizer
+    from src.utils.typing import Tokenizer
 
-    repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-    assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-    if sys.path[0] != repo_path:
-        sys.path.insert(0, repo_path)
-
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer: Tokenizer = AutoTokenizer.from_pretrained(
         pretrained_model_name_or_path="gpt2",
         cache_dir="./pretrained/",
     )
+
     texts = [
         "The quick brown fox jumps over the lazy dog.",
         "A journey of a thousand miles begins with a single step.",

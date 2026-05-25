@@ -69,17 +69,10 @@ class DistinctN:
 
 
 if __name__ == "__main__":
-    import os
-    import sys
-
-    repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-    assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-    if sys.path[0] != repo_path:
-        sys.path.insert(0, repo_path)
-
     from transformers import AutoTokenizer
+    from src.utils.typing import Tokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer: Tokenizer = AutoTokenizer.from_pretrained(
         pretrained_model_name_or_path="gpt2",
         cache_dir="./pretrained/",
     )

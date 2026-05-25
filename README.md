@@ -1,7 +1,6 @@
 # Text Dataset Distillation (TextDD)
 A comprehensive framework for text dataset distillation and condensation experiments.
 
-
 ## Repository Structure
 - `src/` — installable Python package
   - `src/models/` — classifiers, encoders, LLMs, modules
@@ -11,15 +10,11 @@ A comprehensive framework for text dataset distillation and condensation experim
   - `src/metrics/` — text quality and diversity metrics
   - `src/prototypes/` — prototype/distillation methods
   - `src/utils/` — callbacks, data utilities, metadata
-- `pipelines/` — user-facing entrypoint scripts
-- `configs/` — experiment configuration YAMLs
-- `experiments/` — sbatch job definitions
-- `references/` — external dependencies (submodules)
-- `datasets/` — raw and embedded datasets (gitignored)
-- `models/` — pretrained and finetuned weights (gitignored)
-- `analysis/` — aggregation scripts and report notebooks
-- `results/` — training logs and raw outputs (gitignored)
-- `slurm/` — SLURM job stdout/stderr (gitignored)
+- `run.py` — interactive TUI launcher for experiments
+- `expts/` — experiment scripts
+- `datasets/` — raw and embedded
+- `models/` — pretrained and finetuned
+- `results/` — raw, processed, and reported
 
 ## Quick Start
 
@@ -29,26 +24,8 @@ uv sync
 source .venv/bin/activate
 ```
 
-### 2. Prepare Embeddings (Optional)
+### 2. Run Experiments
 ```bash
-python pipelines/embed.py --config=emb-<encoder>-<dataset>-<setting>
+python run.py
 ```
-- **Available encoders**: `tfidf`, `glove`, `e5`, `minilm`
-- **Available datasets**: `agnews`, `imdb`
-- **Available settings**: `train`, `test`
-
-### 3. Condense a Dataset
-```bash
-python pipelines/condense.py --config=cds-<dataset>-<llm>-<mode>
-```
-- **Available datasets**: `agnews`, `imdb`
-- **Available LLMs**: `gemma3_270m`
-- **Available modes**: `dense`, `sparse`
-
-### 4. Evaluate Distilled Datasets
-```bash
-python pipelines/classify.py --config=clfeval-<classifier>-<encoder>-<dataset>
-```
-- **Available classifiers**: `logistic`, `nbayes`, `svm`
-- **Available encoders**: `tfidf`
-- **Available datasets**: `agnews`, `imdb`
+Interactive TUI — select infrastructure (Slurm/Local), spec, duration, experiment, then fill in arguments. Submits or runs directly.

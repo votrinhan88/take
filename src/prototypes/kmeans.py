@@ -1,8 +1,7 @@
 import torch
-import torch.nn as nn
-from torch import Tensor
+from torch import nn, Tensor
 import tqdm.auto as tqdm
-import lightning as L
+import pytorch_lightning as pl
 
 
 class KMeansPlusPlus:
@@ -53,7 +52,7 @@ class KMeansPlusPlus:
         return f"{self.__class__.__name__}(K={self.K})"
 
 
-class KMeansClassifier(L.LightningModule):
+class KMeansClassifier(pl.LightningModule):
     """K-Means.
 
     Args:
@@ -175,18 +174,10 @@ class KMeansClassifier(L.LightningModule):
 
 
 if __name__ == "__main__":
-    import os
-    import sys
-
-    repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-    assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-    if sys.path[0] != repo_path:
-        sys.path.insert(0, repo_path)
-
     def expt_cluster_2D():
         import matplotlib.pyplot as plt
         from matplotlib.colors import ListedColormap
-        from utils.data.synthetic import get_gaussian_clusters_2D
+        from src.utils.data.synthetic import get_gaussian_clusters_2D
 
         NUM_CLUSTERS = 4
         K = 5

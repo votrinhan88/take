@@ -24,7 +24,7 @@ class JinaWrapper(torch.nn.Module):
 if __name__ == "__main__":
     model = AutoModel.from_pretrained(
         pretrained_model_name_or_path="jinaai/jina-embeddings-v5-text-nano",
-        cache_dir="./pretrained/encoders",
+        cache_dir="./models/pretrained/encoders",
         trust_remote_code=True,
         dtype=torch.bfloat16,
     )

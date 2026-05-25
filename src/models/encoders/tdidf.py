@@ -1,12 +1,14 @@
-import lightning as L
+import pickle
+
+import pytorch_lightning as pl
 from scipy.sparse import csr_matrix
 from sklearn.feature_extraction.text import TfidfVectorizer
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 
-class Tfidf(L.LightningModule):
+class Tfidf(pl.LightningModule):
     """Tfidf encoder using scikit-learn's TfidfVectorizer.
 
     Args:
@@ -55,6 +57,19 @@ class Tfidf(L.LightningModule):
             e = self.convert_scipy_csr_to_torch_sparse_coo(e)
         e = e.to(device=self.device, dtype=torch.float32)
         return e
+
+    def save(self, path: str):
+        with open(path, "wb") as f:
+            pickle.dump({"vectorizer": self.vectorizer, "hparams": dict(self.hparams)}, f)
+
+    @classmethod
+    def load(cls, path: str) -> "Tfidf":
+        with open(path, "rb") as f:
+            state = pickle.load(f)
+        obj = cls(**state["hparams"])
+        obj.vectorizer = state["vectorizer"]
+        obj.vocab = state["vectorizer"].get_feature_names_out()
+        return obj
 
     def extra_repr(self) -> str:
         return ", ".join([f"{k}={v}" for k, v in self.hparams.items() if v is not None])
@@ -105,13 +120,6 @@ if __name__ == "__main__":
 
     def test_2():
         print(" Test 2: IMDB ".center(100, "="))
-        # Change path
-        import os, sys
-
-        repo_path = os.path.abspath(os.path.join(__file__, "../.."))
-        if sys.path[0] != repo_path:
-            sys.path.insert(0, repo_path)
-
         from datasets import load_dataset, DatasetDict
         dataset = load_dataset(
             path="stanfordnlp/imdb", cache_dir="./datasets", split="train[:100]"

@@ -19,7 +19,7 @@ class E5Wrapper(nn.Module):
 if __name__ == "__main__":
     model = SentenceTransformer(
         model_name_or_path="intfloat/e5-base-v2",
-        cache_folder="./pretrained/encoders/",
+        cache_folder="./models/pretrained/encoders/",
     )
     encoder = E5Wrapper(model)
 

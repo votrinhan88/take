@@ -4,7 +4,7 @@ from torch import nn, Tensor
 
 
 class InformationGain(nn.Module):
-    def __init__(self, sim_fn: Callable[[Tensor], Tensor]):
+    def __init__(self, sim_fn: Callable[[Tensor, Tensor], Tensor]):
         super().__init__()
         self.sim_fn = sim_fn
 
@@ -25,7 +25,7 @@ class DeterminantalPointProcess(InformationGain):
     def __init__(
         self,
         embeddings: Tensor,
-        sim_fn: Callable[[Tensor], Tensor],
+        sim_fn: Callable[[Tensor, Tensor], Tensor],
         epsilon: float = 1e-6,
     ):
         super().__init__(sim_fn=sim_fn)
@@ -38,7 +38,7 @@ class DeterminantalPointProcess(InformationGain):
             K_DD = self.stabilize_matrix(mat=K_DD)
             self.L = torch.linalg.cholesky(K_DD).to(device=self.device)
 
-    def forward(self, input: Tensor) -> float:
+    def forward(self, input: Tensor) -> Tensor:
         """
         Computes per-sample information gain for each independent x_i in the batch X:
             Delta_i = logdet(K_{D cup {x_i}}) - logdet(K_D)
@@ -152,7 +152,7 @@ class AverageSimilarityGain(InformationGain):
     def __init__(
         self,
         embeddings: Tensor,
-        sim_fn: Callable[[Tensor], Tensor],
+        sim_fn: Callable[[Tensor, Tensor], Tensor],
     ):
         super().__init__(sim_fn=sim_fn)
         self.embeddings = embeddings
@@ -170,7 +170,7 @@ class NearestNeighborDissimilarity(InformationGain):
     def __init__(
         self,
         embeddings: Tensor,
-        sim_fn: Callable[[Tensor], Tensor],
+        sim_fn: Callable[[Tensor, Tensor], Tensor],
         n_neighbors: int = 5,
     ):
         super().__init__(sim_fn=sim_fn)
@@ -198,19 +198,10 @@ class NearestNeighborDissimilarity(InformationGain):
 
 if __name__ == "__main__":
     # Change path
-    import os, sys
-
-    repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-    assert (
-        os.path.basename(repo_path) == "textdd"
-    ), "Wrong parent folder. Please change to 'textdd'"
-    if sys.path[0] != repo_path:
-        sys.path.insert(0, repo_path)
-
     from sentence_transformers import SentenceTransformer, SparseEncoder
     from datasets import load_dataset
 
-    from models.diversity.similarity import (
+    from src.metrics.similarity import (
         CosineSimilarity,
         ExponentialCosineSimilarity,
         NormalizedCosineSimilarity,
@@ -241,7 +232,7 @@ if __name__ == "__main__":
 
         encoder = SentenceTransformer(
             model_name_or_path="all-MiniLM-L6-v2",
-            cache_folder="./pretrained/encoders/all-MiniLM-L6-v2",
+            cache_folder="./models/pretrained/encoders/all-MiniLM-L6-v2",
         )
         embeddings = {
             k: torch.from_numpy(encoder.encode(v)).to(DEVICE)
@@ -307,7 +298,7 @@ if __name__ == "__main__":
 
         encoder = SparseEncoder(
             model_name_or_path="naver/splade-cocondenser-ensembledistil",
-            cache_folder="./pretrained/encoders/splade",
+            cache_folder="./models/pretrained/encoders/splade",
         )
         embeddings = {k: encoder.encode(v).to(DEVICE) for k, v in samples.items()}
 

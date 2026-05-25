@@ -1,4 +1,3 @@
-import lightning as L
 from torch import nn, Tensor
 
 from .base_classifier import BaseClassifier

@@ -177,9 +177,10 @@ cython_debug/
 .claude/
 .vscode/
 datasets/
-models/
+/models/
 results/
 slurm/
 tests/
 
 scripts.md
+todo.md

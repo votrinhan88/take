@@ -1,52 +1,39 @@
 # TODO: Fix the mismatch in state_dict when saving via (1) StateDictCheckpointCallback vs via (2) model.save
 
-import csv
+from __future__ import annotations
+
 from copy import deepcopy
 import os
 import sys
-from typing import Callable
 import warnings
 
-from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
-from lightning.pytorch.loggers import CSVLogger
-from peft import LoraConfig, PeftModel
-import torch
-from torch import nn, Tensor
-from sentence_transformers import SentenceTransformer
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    DataCollatorForLanguageModeling,
-    GenerationConfig,
-    Trainer,
-    TrainingArguments,
-    TrainerCallback,
-)
-from transformers.modeling_outputs import SequenceClassifierOutput
-import yaml
+repo_path = os.path.abspath(os.path.join(__file__, "../.."))
+assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
+if sys.path[0] != repo_path:
+    sys.path.insert(0, repo_path)
 
-sys.path.insert(0, os.path.abspath(os.path.join(__file__, "../..")))
-
-from pipelines.expt_utils import get_dataset, get_llm_model, get_llm_tokenizer, get_encoder
-from src.models.classifiers import ClassifierTrainer, LogisticRegression, TextCNN
-from src.models.encoders import EncoderMetadata, Tfidf, GloVeEncoder, MiniLMWrapper
-from src.finetune import (
-    # callback
-    FinetuneEvalCallback,
-    SampleGenerationCallback,
-    SampleInferenceCallback,
-    StateDictCheckpointCallback,
-    # ClosedEndedCollator,  # collator
-    InstructionFinetuneMapFunction,  # map_fn
-    TextTemplate,  # template
-)
-from src.models.llms.metadata import LLMMetadata
-from src.prototypes.kmeans import KMeansClassifier
-from src.utils.callbacks import PrintCallback
-from src.utils.metadata import DatasetMetadata
+from src.metadata import DatasetMetadata, EncoderMetadata, LLMMetadata
 
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+def get_parser():
+    # fmt: off
+    import argparse
+    p = argparse.ArgumentParser()
+    g = p.add_argument_group("Metaconfig arguments")
+    g.add_argument("--base_config", type=str)
+    g.add_argument("--run", default=0)
+    g.add_argument("--n_runs", type=int, default=1)
+    g = p.add_argument_group("Dataset arguments")
+    g.add_argument("--dataset", type=str, choices=DatasetMetadata.supported)
+    g = p.add_argument_group("Model arguments")
+    g.add_argument("--model", type=str, choices=LLMMetadata.supported)
+    g.add_argument("--encoder", type=str, choices=EncoderMetadata.supported, default="minilm")
+    g = p.add_argument_group("Optimization arguments")
+    g.add_argument("--batch_size", type=int)
+    g.add_argument("--num_epochs", type=int)
+    g.add_argument("--lr", type=float)
+    # fmt: on
+    return p
 
 
 class ConfigFactory:
@@ -97,7 +84,7 @@ class ConfigFactory:
         self.metaconfig = {
             "name": f"ftn-{self.dataset}-{self.model}",
             "expt": "ftn",
-            "path": "./logs/finetune",
+            "path": "./results/raw/finetune",
             "args": self.args,
             "run": "eval:f'{run}'",
         }
@@ -128,13 +115,6 @@ class ConfigFactory:
             "model": {
                 "abbrev": self.model,
                 **self.metadata_llm.get_preset_model(),
-                "lora_config": {
-                    "r": 16,
-                    "lora_alpha": 32,
-                    "lora_dropout": 0.05,
-                    "bias": "none",
-                    "task_type": "CAUSAL_LM",
-                },
             },
             "tokenizer": {
                 "abbrev": self.model,
@@ -216,10 +196,7 @@ class ConfigFactory:
         return config
 
     def override_config(self, config: dict, **kwargs) -> dict:
-        keys_avail = self.supported_overrides
         for k, v in self.override_args.items():
-            assert k in keys_avail, f"Unknown key: {k}"
-
             if k == "batch_size":
                 config["trainer"]["args"]["per_device_train_batch_size"] = v
                 config["trainer"]["args"]["per_device_eval_batch_size"] = v
@@ -246,7 +223,7 @@ class ConfigFactory:
             yaml.dump(data=self.config, stream=f, sort_keys=False)
 
         if verbose:
-            print(f"Config exported to {path_config}.")
+            print(f"Exported config to {path_config}.")
 
         return path_config
 
@@ -380,25 +357,52 @@ def expt_finetune(config: dict, run: int = 0):
 
 
 if __name__ == "__main__":
-    import argparse
+    import csv
+    from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
+    # from pytorch_lightning.loggers import CSVLogger
+    from peft import LoraConfig, PeftModel
+    import torch
+    from torch import nn, Tensor
+    from sentence_transformers import SentenceTransformer
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        DataCollatorForLanguageModeling,
+        GenerationConfig,
+        Trainer,
+        TrainingArguments,
+        TrainerCallback,
+    )
+    # from transformers.modeling_outputs import SequenceClassifierOutput
+    import yaml
 
-    from expts.expt_utils import ConfigParser, TypeArgparse, pprint, rename_runs
+    from src.finetune import (
+        FinetuneEvalCallback,
+        SampleGenerationCallback,
+        SampleInferenceCallback,
+        StateDictCheckpointCallback,
+        InstructionFinetuneMapFunction,
+        TextTemplate,
+    )
+    from src.models.classifiers import ClassifierTrainer, LogisticRegression, TextCNN
+    from src.models.encoders import Tfidf, GloVeEncoder, MiniLMWrapper
+    from src.utils.callbacks import PrintCallback
+    from expts.expt_utils import (
+        ConfigParser,
+        TypeArgparse,
+        get_dataset,
+        get_encoder,
+        get_llm_model,
+        get_llm_tokenizer,
+        pprint,
+        rename_runs,
+    )
 
-    # fmt: off
-    args = argparse.ArgumentParser()
-    args_group = args.add_argument_group("Metaconfig arguments")
-    args_group.add_argument("--base_config", type=str)
-    args_group.add_argument("--run", type=TypeArgparse.int_or_str, default=0)
-    args_group.add_argument("--n_runs", type=int, default=1)
-    args_group = args.add_argument_group("Dataset arguments")
-    args_group.add_argument("--dataset", type=str, choices=DatasetMetadata.supported)
-    args_group = args.add_argument_group("Model arguments")
-    args_group.add_argument("--model", type=str, choices=LLMMetadata.supported)
-    args_group.add_argument("--encoder", type=str, choices=EncoderMetadata.supported, default="minilm")
-    args_group = args.add_argument_group("Optimization arguments")
-    args_group.add_argument("--batch_size", type=int)
-    args_group.add_argument("--num_epochs", type=int)
-    args_group.add_argument("--lr", type=float)
+    args = get_parser()
+    for action in args._actions:
+        if action.dest == "run":
+            action.type = TypeArgparse.int_or_str
+            break
     args = args.parse_args()
     custom_args = {
         k: getattr(args, k)
@@ -410,7 +414,6 @@ if __name__ == "__main__":
         ]
         if getattr(args, k) is not None
     }
-    # fmt: on
     parser = ConfigParser(globals=globals(), locals=locals())
     config_factory = ConfigFactory(**custom_args)
     config = config_factory.get_config()

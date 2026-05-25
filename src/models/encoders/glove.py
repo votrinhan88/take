@@ -40,7 +40,7 @@ class GloVeEncoder(nn.Module):
             return value
 
     def load_glove_embeddings(self):
-        path = f"./pretrained/encoders/glove/glove.6B.{self.embed_dim}d.txt"
+        path = f"./models/pretrained/encoders/glove/glove.6B.{self.embed_dim}d.txt"
 
         self.word_2_idx = {"PADDING_TOKEN": 0}
         self.vocab = ["PADDING_TOKEN"]
@@ -135,13 +135,6 @@ class GloVeEncoder(nn.Module):
 
 
 if __name__ == "__main__":
-    import os, sys
-
-    repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-    assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-    if sys.path[0] != repo_path:
-        sys.path.insert(0, repo_path)
-
     from sentence_transformers import SentenceTransformer
     from datasets import load_dataset
 
@@ -160,7 +153,7 @@ if __name__ == "__main__":
         glove = GloVeEncoder(embed_dim=300)
         glove_sbert = SentenceTransformer(
             model_name_or_path="sentence-transformers/average_word_embeddings_glove.6B.300d",
-            cache_folder="./pretrained/encoders/glove/GloVe-300d",
+            cache_folder="./models/pretrained/encoders/glove/GloVe-300d",
         )
 
         tokens = glove.tokenize(sentences)

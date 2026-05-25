@@ -1,4 +1,4 @@
-import lightning as L
+import pytorch_lightning as pl
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -8,7 +8,7 @@ from .base_classifier import BaseClassifier
 from src.utils.metrics import WallTime
 
 
-class ClassifierTrainer(L.LightningModule):
+class ClassifierTrainer(pl.LightningModule):
     """Classifier trainer.
 
     Args:
@@ -98,11 +98,11 @@ class ClassifierTrainer(L.LightningModule):
         return loss
 
     def fit(self, fit_kw, **L_trainer_kw) -> dict:
-        L_trainer = L.Trainer(**L_trainer_kw)
+        L_trainer = pl.Trainer(**L_trainer_kw)
         L_trainer.fit(self, **fit_kw)
         return {k: v.item() for k, v in L_trainer.callback_metrics.items()}
 
     def evaluate(self, eval_kw, **L_trainer_kw) -> dict:
-        L_trainer = L.Trainer(**L_trainer_kw)
+        L_trainer = pl.Trainer(**L_trainer_kw)
         L_trainer.validate(self, **eval_kw)
         return {k: v.item() for k, v in L_trainer.callback_metrics.items()}

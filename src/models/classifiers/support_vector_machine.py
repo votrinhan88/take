@@ -1,8 +1,8 @@
 import torch
 from torch import nn, Tensor
 
-from .base_classifier import BaseClassifier
 from ..modules.losses import get_reduction_fn
+from .base_classifier import BaseClassifier
 
 
 class SupportVectorMachine(BaseClassifier):

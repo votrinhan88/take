@@ -1,18 +1,11 @@
-import os
-import sys
 import warnings
 
 import torch
 from torch import nn, Tensor
 from transformers import AutoTokenizer
 
-repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-if sys.path[0] != repo_path:
-    sys.path.insert(0, repo_path)
-
-from models.llms.metadata import LLMMetadata
-from utils.metadata import DatasetMetadata
+from src.metadata import DatasetMetadata, LLMMetadata
+from src.utils.typing import Tokenizer
 
 
 class InstructionFinetuneMapFunction:
@@ -20,7 +13,7 @@ class InstructionFinetuneMapFunction:
 
     def __init__(
         self,
-        tokenizer,
+        tokenizer: Tokenizer,
         dataset: str,
         model: str,
         task: str,

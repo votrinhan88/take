@@ -1,13 +1,5 @@
-# Change path
-import os
-import sys
-
-repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-if sys.path[0] != repo_path:
-    sys.path.insert(0, repo_path)
-
 from copy import deepcopy
+import os
 
 from datasets import Dataset, DatasetDict
 import mauve
@@ -25,16 +17,13 @@ from transformers import (
     TrainerState,
 )
 
-from utils.metadata import DatasetMetadata
-from models.finetune.templates import TextTemplate
-from models.generate.utils import generate
-from utils.pythonic.numeric_utils import balanced_partition
-from utils.pythonic.dict_utils import flatten_dictlist
-
-from models.metrics.perplexity import Perplexity
-from models.metrics.distinctn import DistinctN
-from models.metrics.selfbleu import SelfBLEU
-from models.metrics.dcr import DistanceToClosestRecord
+from src.metadata import DatasetMetadata
+from src.utils.typing import Tokenizer
+from src.finetune.templates import TextTemplate
+from src.generate.utils import generate
+from src.metrics import Perplexity, DistinctN, SelfBLEU, DistanceToClosestRecord
+from src.utils.pythonic.numeric_utils import balanced_partition
+from src.utils.pythonic.dict_utils import flatten_dictlist
 
 
 def merge_generation_config(
@@ -63,7 +52,7 @@ class SampleGenerationCallback(TrainerCallback):
         self,
         output: str,
         dataset: str,
-        tokenizer,
+        tokenizer: Tokenizer,
         genconfig: GenerationConfig | None = None,
         num_samples_uncond: int = 6,
         num_samples_cond_per_class: int = 3,
@@ -148,7 +137,7 @@ class SampleInferenceCallback(TrainerCallback):
         self,
         output: str,
         dataset: str,
-        tokenizer,
+        tokenizer: Tokenizer,
         genconfig_generation: GenerationConfig | None = None,
         genconfig_inference: GenerationConfig | None = None,
         num_samples_per_class: int = 3,
@@ -248,7 +237,7 @@ class FinetuneEvalCallback(TrainerCallback):
 
     def __init__(
         self,
-        tokenizer,
+        tokenizer: Tokenizer,
         encoder,
         output_csv: str | None,
         output_log: str | None,

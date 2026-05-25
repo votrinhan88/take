@@ -1,6 +1,3 @@
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
-
 [project]
 name = "textdd"
 version = "0.1.0"
@@ -9,20 +6,31 @@ dependencies = [
     "datasets",
     "evaluate",
     "ipykernel",
-    "lightning",
     "matplotlib",
     "nltk",
     "numpy",
     "polars",
     "peft",
+    "pytorch-lightning",
     "PyYAML",
     "scikit-learn",
     "sentence-transformers",
-    "torch",
-    "torchinfo",
+    "torch==2.11.0",
     "tqdm",
     "transformers",
+    "questionary>=2.1.1",
+    "pot>=0.9.6.post1",
+    "mauve-text>=0.4.0",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+
 
 # Dataset Distillation with Attention Labels for Fine-tuning BERT - Maekawa et al., ACL 2023
 # https://github.com/arumaekawa/dataset-distillation-with-attention-labels/blob/master/requirements.txt

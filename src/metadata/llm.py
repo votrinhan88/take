@@ -1,9 +1,7 @@
-from peft import LoraConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-
 class LLMMetadata:
     supported = ["gemma3_270m", "gemma3_1b", "gpt2", "llama32_1b", "qwen3_600m", "albert"]
+    supported_cls = ["albert"]
+    supported_nli = ["albert"]
     CONTEXT_LENGTH = {
         "gemma3_270m": 131072,
         "gemma3_1b": 131072,
@@ -31,7 +29,7 @@ class LLMMetadata:
                 "Class": "eval:AutoModelForCausalLM.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "google/gemma-3-270m",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "device_map": "auto",
                 },
                 "set_eos_as_pad": False,
@@ -51,7 +49,7 @@ class LLMMetadata:
                 "Class": "eval:AutoModelForCausalLM.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "google/gemma-3-1b-pt",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "device_map": "auto",
                 },
                 "set_eos_as_pad": False,
@@ -71,7 +69,7 @@ class LLMMetadata:
                 "Class": "eval:AutoModelForCausalLM.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "gpt2",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "device_map": "auto",
                 },
                 "set_eos_as_pad": True,
@@ -91,7 +89,7 @@ class LLMMetadata:
                 "Class": "eval:AutoModelForCausalLM.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "meta-llama/Llama-3.2-1B",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "device_map": "auto",
                 },
                 "set_eos_as_pad": True,
@@ -111,7 +109,7 @@ class LLMMetadata:
                 "Class": "eval:AutoModelForCausalLM.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "Qwen/Qwen3-0.6B",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "device_map": "auto",
                 },
                 "set_eos_as_pad": False,
@@ -131,7 +129,7 @@ class LLMMetadata:
                 "Class": "eval:AutoModelForSequenceClassification.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "albert-base-v2",
-                    "cache_dir": "./pretrained/seqclf/",
+                    "cache_dir": "./models/pretrained/seqclf/",
                     "device_map": "auto",
                 },
                 "lora_config": {
@@ -156,7 +154,7 @@ class LLMMetadata:
                 "Class": "eval:AutoTokenizer.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "google/gemma-3-270m",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "padding_side": "right",
                 },
                 "set_eos_as_pad": False,
@@ -168,7 +166,7 @@ class LLMMetadata:
                 "Class": "eval:AutoTokenizer.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "google/gemma-3-1b-pt",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "padding_side": "right",
                 },
                 "set_eos_as_pad": False,
@@ -180,7 +178,7 @@ class LLMMetadata:
                 "Class": "eval:AutoTokenizer.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "gpt2",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "padding_side": "right",
                 },
                 "set_eos_as_pad": True,
@@ -192,7 +190,7 @@ class LLMMetadata:
                 "Class": "eval:AutoTokenizer.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "meta-llama/Llama-3.2-1B",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "padding_side": "right",
                 },
                 "set_eos_as_pad": True,
@@ -204,7 +202,7 @@ class LLMMetadata:
                 "Class": "eval:AutoTokenizer.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "Qwen/Qwen3-0.6B",
-                    "cache_dir": "./pretrained/llms/",
+                    "cache_dir": "./models/pretrained/llms/",
                     "padding_side": "right",
                 },
                 "set_eos_as_pad": False,
@@ -216,7 +214,7 @@ class LLMMetadata:
                 "Class": "eval:AutoTokenizer.from_pretrained",
                 "kwargs": {
                     "pretrained_model_name_or_path": "albert-base-v2",
-                    "cache_dir": "./pretrained/seqclf/",
+                    "cache_dir": "./models/pretrained/seqclf/",
                 },
             }
             return preset_metadata

@@ -264,13 +264,6 @@ class CDist(nn.Module):
 
 if __name__ == "__main__":
     # Change path
-    import os, sys
-
-    repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-    assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-    if sys.path[0] != repo_path:
-        sys.path.insert(0, repo_path)
-
     from sentence_transformers import SentenceTransformer, SparseEncoder
     from datasets import load_dataset, Dataset
 
@@ -296,10 +289,10 @@ if __name__ == "__main__":
 
         encoder = SentenceTransformer(
             model_name_or_path="all-MiniLM-L6-v2",
-            cache_folder="./pretrained/encoders/all-MiniLM-L6-v2",
+            cache_folder="./models/pretrained/encoders/all-MiniLM-L6-v2",
         )
         embeddings: dict[str, Tensor] = {
-            split: torch.from_numpy(encoder.encode(texts))  # ty: ignore
+            split: torch.from_numpy(encoder.encode(texts))
             for split, texts in samples.items()
         }
 
@@ -335,7 +328,7 @@ if __name__ == "__main__":
 
         encoder = SparseEncoder(
             model_name_or_path="naver/splade-cocondenser-ensembledistil",
-            cache_folder="./pretrained/encoders/splade",
+            cache_folder="./models/pretrained/encoders/splade",
         )
         embeddings: dict[str, Tensor] = {
             split: encoder.encode(texts) for split, texts in samples.items()

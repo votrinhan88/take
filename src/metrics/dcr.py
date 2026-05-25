@@ -53,18 +53,11 @@ class DistanceToClosestRecord:
 
 
 if __name__ == "__main__":
-    import os
-    import sys
-
-    repo_path = os.path.abspath(os.path.join(__file__, "../../.."))
-    assert os.path.basename(repo_path) == "textdd", "Wrong parent folder. Please change to 'textdd'"
-    if sys.path[0] != repo_path:
-        sys.path.insert(0, repo_path)
-
     from transformers import AutoTokenizer
     from datasets import load_dataset, Dataset
     from sentence_transformers import SentenceTransformer
-    from models.encoders.minilm import MiniLMWrapper
+    
+    from src.models.encoders.minilm import MiniLMWrapper
 
     dataset: list[Dataset] = load_dataset(
         path="fancyzhx/ag_news",
@@ -73,7 +66,7 @@ if __name__ == "__main__":
     )
     encoder = SentenceTransformer(
         model_name_or_path="all-MiniLM-L6-v2",
-        cache_folder="./pretrained/encoders/all-MiniLM-L6-v2",
+        cache_folder="./models/pretrained/encoders/all-MiniLM-L6-v2",
     )
     encoder = MiniLMWrapper(model=encoder)
 
