@@ -1,3 +1,4 @@
+import torch
 from torch import nn, Tensor
 
 from ..modules import Concatenate
@@ -76,9 +77,15 @@ class TextCNN(BaseClassifier):
         + `mask`: Tensor of shape [B, S], 1 for real tokens, 0 for pad. If None, masking is skipped.
         """
         # input: [B, S, E] (batch, sequence, embedding)
-        mask = self.infer_mask(input) if mask is None else mask  # [B, S] / None
+        x = input
+        if input.shape[1] < max(self.kernel_sizes):
+            pad = max(self.kernel_sizes) - x.shape[1]
+            x_pad = torch.zeros(size=[x.shape[0], pad, x.shape[2]], device=x.device)
+            x = torch.cat([x, x_pad], dim=1)
+        
+        mask = self.infer_mask(x) if mask is None else mask  # [B, S] or None
 
-        x = input.unsqueeze(dim=1)  # [B, 1, S, E]
+        x = x.unsqueeze(dim=1)  # [B, 1, S, E]
         x_conv = [conv(x).squeeze(dim=3) for conv in self.convs]  # list[B, C, S-ks+1]
         if mask is not None:
             for i, (xc, ks) in enumerate(zip(x_conv, self.kernel_sizes)):

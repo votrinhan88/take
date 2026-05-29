@@ -478,7 +478,7 @@ class TrajectoryAwareKnowledgeEstimator:
 
         elif arg == "temporal_kernel":
             if isinstance(value, str):
-                assert value in ["cosine", "exponential", "linear"], (
+                assert value in TemporalKernel.supported_kernels, (
                     f"Unsupported temporal kernel strategy: {value}."
                 )
                 return TemporalKernel(strategy=value)

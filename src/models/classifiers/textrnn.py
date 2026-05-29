@@ -89,15 +89,21 @@ class TextRNN(nn.Module):
         + `input`: Tensor of shape [B, S, E]
         + `mask`: Tensor of shape [B, S], 1 for real tokens, 0 for pad. If None, masking is skipped.
         """
-        mask = self.infer_mask(input) if mask is None else mask  # [B, S] or None
+        # input: [B, S, E] (batch, sequence, embedding)
+        x = input
+        if input.shape[1] == 0:
+            x_pad = torch.zeros(input.shape[0], 1, input.shape[2], device=input.device)
+            x = torch.cat([x, x_pad], dim=1)
+        
+        mask = self.infer_mask(x) if mask is None else mask  # [B, S] or None
 
         if mask is not None:
             lengths = mask.sum(dim=1).cpu()  # [B], true lengths
             lengths[lengths == 0] = 1  # all-0 embedding for zero-length (OOV) sequences
-            packed = pack_padded_sequence(input, lengths, batch_first=True, enforce_sorted=False)
+            packed = pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
             _, (hidden, _) = self.rnn(packed)  # [n_layers * n_dir, B, H]
         else:
-            _, (hidden, _) = self.rnn(input)  # [n_layers * n_dir, B, H]
+            _, (hidden, _) = self.rnn(x)  # [n_layers * n_dir, B, H]
 
         if self.rnn.bidirectional:
             hidden = self.dropout(torch.cat((hidden[-2], hidden[-1]), dim=1))  # [B, 2H]
