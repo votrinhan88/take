@@ -30,8 +30,9 @@ def get_parser():
     g = p.add_argument_group("Models arguments")
     g.add_argument("--llm", type=str, default="gemma3_270m", choices=LLMMetadata.supported)
     g.add_argument("--encoder", type=str, default="minilm", choices=EncoderMetadata.supported)
-    g.add_argument("--influencer", type=str, choices=ClassifierMetadata.supported + [None])
+    g.add_argument("--influencer", type=str, choices=ClassifierMetadata.supported_cls + [None])
     g.add_argument("--take.n_updates_per_step", type=int)
+    g.add_argument("--take.temporal_kernel", type=str, choices=TemporalKernel.supported_kernels + [None])
     g = p.add_argument_group("Condense arguments")
     g.add_argument("--condense", type=str, default="discreteot", choices=["kmeans", "discreteot"])
     g.add_argument("--add_train", type=TypeArgparse.bool_strict)
@@ -56,6 +57,7 @@ class ConfigFactory:
         "batch_size_encode",
         "add_train",
         "take.n_updates_per_step",
+        "take.temporal_kernel",
         "n_samples",
         "conditional",
         "export_csv",
@@ -78,7 +80,7 @@ class ConfigFactory:
             self.base_config = None
             self.dataset = self.args["dataset"]
             self.encoder = self.args["encoder"]
-            self.influencer = self.args["influencer"]
+            self.influencer = self.args.get("influencer")
             self.llm = self.args["llm"]
             self.condense = self.args["condense"]
             self.eval_classifier = self.args.get("eval.classifier")
@@ -106,7 +108,7 @@ class ConfigFactory:
 
     def get_set_metaconfig(self) -> dict:
         self.metaconfig = {
-            "name": f"cds-{self.dataset}-{self.llm}-{self.encoder}-{self.influencer}-{self.condense}",
+            "name": f"cds-{self.dataset}-{self.llm}",
             "expt": f"expt_{self.condense}",
             "path": "./results/raw/condense",
             "args": self.args,
@@ -144,18 +146,27 @@ class ConfigFactory:
 
     def get_config_models(self) -> dict:
         config = {}
-        splits_corpus = "+".join(self.metadata_dataset.get_preset()["splits_corpus"])
-        if self.encoder == "tfidf":
-            raise NotImplementedError("Please code this asap!")
-        elif self.encoder == "glove":
+        if self.encoder == "glove":
             config["encoder"] = self.metadata_encoder.get_preset()
             if self.influencer in ["logistic", "svm"]:
                 config["encoder"]["kwargs"]["embed_level"] = "sentence"
         elif self.encoder in ["e5", "jina_nano", "jina_small", "minilm"]:
             config["encoder"] = self.metadata_encoder.get_preset()
         else:
-            # Maybe a larger one also since minilm can only handle 256 first tokens
+            # Maybe a larger one, since minilm can only handle 256 first tokens
             raise ValueError(f"Unsupported encoder: {self.encoder}")
+
+        config["llm"] = {
+            "model": {
+                "abbrev": self.llm,
+                **self.metadata_llm.get_preset_model(),
+                "load_state_dict": {
+                    "f": f"./results/processed/finetune/ftn-{self.dataset}-{self.llm}/lora.pt",
+                    "weights_only": True,
+                },
+            },
+            "tokenizer": self.metadata_llm.get_preset_tokenizer(),
+        }
 
         if self.influencer is not None:
             config["influencer"] = self.metadata_influencer.get_preset()
@@ -174,44 +185,34 @@ class ConfigFactory:
             else:
                 raise ValueError(f"Unsupported influencer: {self.influencer}")
 
-        config["llm"] = {
-            "model": {
-                "abbrev": self.llm,
-                **self.metadata_llm.get_preset_model(),
-                "load_state_dict": {
-                    "f": f"./results/raw/finetune/ftn-{self.dataset}-{self.llm}/lora.pt",
-                    "weights_only": True,
-                },
-            },
-            "tokenizer": self.metadata_llm.get_preset_tokenizer(),
-        }
-
-        if self.condense == "discreteot":
-            lr = {"logistic": 3e-3, "svm": 3e-3, "siamlog": 3e-3, "textcnn": 3e-4, "textrnn": 3e-4}[
-                self.influencer
-            ]
-            config["take"] = {
-                "kwargs": {
-                    "params_inf": "linear",  # linear for logistic, svm, textcnn, textrnn, ? albert
-                    "temporal_kernel": "exponential",
-                    "loss_fn": "ce",
-                    "verbose": True,
-                    "device": "auto",
-                },
-                "kwargs_call": {
-                    "trajectory_dir": None,
-                    "opt_kwargs": {
-                        "Class": "eval:torch.optim.AdamW",
-                        "kwargs": {
-                            "lr": lr,
-                            "weight_decay": 5e-4,
-                        },
+            if self.condense == "discreteot":
+                lr = {
+                    "logistic": 3e-3,
+                    "svm": 3e-3,
+                    "siamlog": 3e-3,
+                    "textcnn": 3e-4,
+                    "textrnn": 3e-4,
+                }
+                lr = lr[self.influencer]
+                config["take"] = {
+                    "kwargs": {
+                        "params_inf": "linear",  # linear for logistic, svm, textcnn, textrnn, ? albert
+                        "temporal_kernel": "exponential",
+                        "loss_fn": "ce",
+                        "verbose": True,
+                        "device": "auto",
                     },
-                    "batch_size": 128,
-                    "n_updates_per_step": 2,
-                    "n_steps": 50,
-                },
-            }
+                    "kwargs_call": {
+                        "trajectory_dir": None,
+                        "opt_kwargs": {
+                            "Class": "eval:torch.optim.AdamW",
+                            "kwargs": {"lr": lr, "weight_decay": 5e-4},
+                        },
+                        "batch_size": 128,
+                        "n_updates_per_step": 2,
+                        "n_steps": 50,
+                    },
+                }
         return config
 
     def get_config_condense(self) -> dict:
@@ -256,7 +257,7 @@ class ConfigFactory:
     def get_config_evaluate(self) -> dict:
         config = {}
 
-        config.update({"metrics": "all", "n_samples": 1000, "verbose": True})
+        config.update({"metrics": "none", "n_samples": 1000, "verbose": True})
         config.update({"length": {}})
         config.update({"perplexity": {}})
         config.update({"distinctn": {}})
@@ -349,7 +350,9 @@ class ConfigFactory:
             elif k == "add_train":
                 config["condense"]["add_train"].append(v)
             elif k == "take.n_updates_per_step":
-                config["take"]["kwargs_call"]["n_updates_per_step"] = v
+                config["models"]["take"]["kwargs_call"]["n_updates_per_step"] = v
+            elif k == "take.temporal_kernel":
+                config["models"]["take"]["kwargs"]["temporal_kernel"] = v
             elif k == "n_samples":
                 config["condense"]["n_samples"] = v
             elif k == "conditional":
@@ -455,6 +458,19 @@ def evaluate_dataset(config: dict | None, dataset: DatasetDict, llm, tokenizer) 
         split: shuffle_trim(dataset=dataset[split], n_samples=config["n_samples"])
         for split in dataset.keys()
     }
+
+    if config["metrics"] == "all":
+        config["metrics"] = [
+            "length",
+            "perplexity",
+            "distinctn",
+            "selfbleu",
+            "dcr",
+            "mauve",
+            "utility_lgr",
+        ]
+    elif config["metrics"] in ["false", "none"]:
+        config["metrics"] = []
 
     metrics = {}
     if "length" in config["metrics"]:
@@ -591,7 +607,7 @@ def export_dataset(
         batch["label_str"] = metadata.idx_2_label(batch["label"].tolist())
         return batch
 
-    dataset = dataset.map(function=map_fn)
+    dataset = dataset.map(function=map_fn, batched=True)
     dataset = dataset.remove_columns(column_names=["label"])
     dataset = dataset.rename_column(original_column_name="label_str", new_column_name="label")
     dataset = dataset.select_columns(columns)
@@ -658,7 +674,6 @@ def expt_cds_kmeans(config: dict, run: int = 0) -> Dataset:
         llm=llm,
         tokenizer=tokenizer,
     )
-    pprint(evaluate_metrics)
     return dataset["condense"]
 
 
@@ -675,13 +690,18 @@ def expt_cds_discreteot(config: dict, run: int = 0):
     pool_emb = ensure_tensor(pool["embedding"][:])
 
     # Compute knowledge values (weights) for source samples
-    influencer: nn.Module = get_classifier(config=config["models"]["influencer"])
-    take = TrajectoryAwareKnowledgeEstimator(model=influencer, **config["models"]["take"]["kwargs"])
-    knowledge = take(
-        inputs=source_emb,
-        targets=ensure_tensor(dataset["train"]["label"][:]),
-        **config["models"]["take"]["kwargs_call"],
-    )
+    if config["models"].get("influencer") is not None:
+        influencer: nn.Module = get_classifier(config=config["models"]["influencer"])
+        take = TrajectoryAwareKnowledgeEstimator(
+            model=influencer, **config["models"]["take"]["kwargs"]
+        )
+        knowledge = take(
+            inputs=source_emb,
+            targets=ensure_tensor(dataset["train"]["label"][:]),
+            **config["models"]["take"]["kwargs_call"],
+        )
+    else:
+        knowledge = torch.ones(size=[len(source_emb)], device=source_emb.device) / len(source_emb)
 
     if config["condense"].get("conditional", False):
         cds_datasets: list[Dataset] = []
@@ -730,7 +750,6 @@ def expt_cds_discreteot(config: dict, run: int = 0):
         llm=llm,
         tokenizer=tokenizer,
     )
-    pprint(evaluate_metrics)
     return dataset["condense"]
 
 
@@ -808,6 +827,7 @@ if __name__ == "__main__":
         DiscreteOTDistiller,
         TrajectoryAwareKnowledgeEstimator,
         TemperatureScheduler,
+        TemporalKernel,
     )
     from src.prototypes.kmeans import KMeansClassifier
     from src.utils.callbacks import PrintCallback
