@@ -38,14 +38,32 @@ def get_parser():
     return p
 
 
+class SequenceMap:
+    def __init__(self, dataset: str):
+        self.metadata = DatasetMetadata(dataset=dataset)
+        self.col = self.metadata.text_keys[0]
+
+    def preprocess(self, dataset: DatasetDict) -> DatasetDict:
+        if self.col == "text":
+            return dataset
+
+        def map_fn(batch: dict) -> dict:
+            batch["text"] = batch[self.col]
+            return batch
+
+        return dataset.map(map_fn, batched=True, remove_columns=[self.col])
+
+
 class BERTSequenceMap:
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, dataset: str):
         self.tokenizer = tokenizer
+        self.metadata = DatasetMetadata(dataset=dataset)
+        self.col = self.metadata.text_keys[0]
 
     def preprocess(self, dataset: DatasetDict) -> DatasetDict:
         def map_fn(batch: dict) -> dict:
             tokenized = self.tokenizer(
-                batch["text"],
+                batch[self.col],
                 add_special_tokens=True,
                 truncation=True,
             )
@@ -137,8 +155,6 @@ class ConfigFactory:
                 "shuffle": {"train": True, "test": False},
                 "num_workers": 4,
             }
-        if self.dataset in DatasetMetadata.requires_unify_map:
-            config["unify_text"] = True
         return config
 
     def get_config_models(self) -> dict:
@@ -291,8 +307,20 @@ class ConfigFactory:
 
     def override_config(self, config: dict, **kwargs) -> dict:
         for k, v in self.override_args.items():
-            
             if k == "dataset_path":
+                if os.path.isdir(v):
+                    run_str = str(kwargs.get("run", ""))
+                    last = run_str.split("-")[-1]  # -v<number> suffix
+                    if not (last.startswith("v") and last[1:].isdigit()):
+                        raise ValueError(
+                            f"dataset_path is a folder but args.run={run_str!r} has no -v<number> suffix"
+                        )
+                    matches = glob.glob(os.path.join(v, f"*-{last}.csv"))
+                    if len(matches) != 1:
+                        raise ValueError(
+                            f"Expected exactly 1 CSV matching *-{last}.csv in {v!r}, found {len(matches)} matches."
+                        )
+                    v = matches[0]
                 config["dataset"]["splits"].remove("train")
                 config["dataset"]["splits_custom"] = {
                     "train": {"init_with": "from_csv", "from_csv_kwargs": {"path_or_paths": v}}
@@ -370,7 +398,7 @@ class ConfigFactory:
             name = self.metaconfig["name"]
             args_str = ""
             for k, v in self.args.items():
-                if k in ["base_config", "run", "n_runs", "dataset", "encoder", "classifier"]:
+                if k in ["base_config", "run", "n_runs", "dataset", "encoder", "classifier", "dataset_path"]:
                     continue
                 args_str += f"-{k}={v}"
             path_config = f"{path}/{name}/{name}-config{args_str}.yaml"
@@ -390,11 +418,19 @@ def preprocess_data(
 ) -> DatasetDict:
     metadata = DatasetMetadata(dataset=config["abbrev"])
 
-    if config.get("unify_text") is not None:
-        map_fn, map_kwargs = metadata.get_unify_map()
-        dataset = dataset.map(map_fn, **map_kwargs)
-
     if config.get("cast_label") is not None:
+        if dataset["train"].features["label"].dtype in ["string", "large_string"]:
+
+            def map_fn(batch: dict) -> dict:
+                batch["label_int"] = metadata.label_2_idx(batch["label"])
+                return batch
+
+            dataset["train"] = dataset["train"].map(function=map_fn, batched=True)
+            dataset["train"] = dataset["train"].remove_columns(column_names=["label"])
+            dataset["train"] = dataset["train"].rename_column(
+                original_column_name="label_int",
+                new_column_name="label",
+            )
         dataset = dataset.cast_column(column="label", feature=ClassLabel(names=metadata.classes))
 
     if config.get("randsubset") is not None:
@@ -403,14 +439,17 @@ def preprocess_data(
 
     if config.get("eda") is not None:
         eda = EasyDataAugmentation(aug_factor=config["eda"])
-        dataset["train"] = eda.augment_dataset(dataset["train"]).shuffle()
+        text_keys = metadata.text_keys
+        dataset["train"] = eda.augment_dataset(dataset["train"], text_keys=text_keys).shuffle()
 
-    if classifier in ClassifierMetadata.supported_cls:
+    if classifier in LLMMetadata.supported_cls:
+        mapper = BERTSequenceMap(tokenizer=tokenizer, dataset=config["abbrev"])
+        dataset = mapper.preprocess(dataset=dataset)
+    elif classifier in ClassifierMetadata.supported_cls:
+        mapper = SequenceMap(dataset=config["abbrev"])
+        dataset = mapper.preprocess(dataset=dataset)
         if config["abbrev"] == "sst2":
             dataset["test"] = dataset.pop("validation")
-    elif classifier in LLMMetadata.supported_cls:
-        mapper = BERTSequenceMap(tokenizer=tokenizer)
-        dataset = mapper.preprocess(dataset=dataset)
 
     return dataset
 
@@ -520,6 +559,8 @@ def expt_clf(config: dict, run: int | str = 0):
 
 
 if __name__ == "__main__":
+    import glob
+    
     from datasets import ClassLabel, DatasetDict
     import pandas as pd
     from pytorch_lightning import Callback

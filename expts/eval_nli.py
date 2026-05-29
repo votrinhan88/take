@@ -1,7 +1,6 @@
 from __future__ import annotations
 import argparse
 from copy import deepcopy
-import csv
 import os
 import sys
 
@@ -23,9 +22,9 @@ def get_parser():
     g = p.add_argument_group("Dataset arguments")
     g.add_argument("--dataset", type=str, choices=DatasetMetadata.supported_nli)
     g.add_argument("--dataset_path", type=str)
-    g.add_argument("--batch_size", type=int)
     g.add_argument("--randsubset", type=float)
     g.add_argument("--eda", type=int)
+    g.add_argument("--batch_size", type=int)
     g = p.add_argument_group("Model arguments")
     g.add_argument("--encoder", type=str, choices=EncoderMetadata.supported + [None])
     g.add_argument("--classifier", type=str, choices=ClassifierMetadata.supported_nli + LLMMetadata.supported_nli)
@@ -294,6 +293,20 @@ class ConfigFactory:
         for k, v in self.override_args.items():
 
             if k == "dataset_path":
+                if os.path.isdir(v):
+                    run_str = str(kwargs.get("run", ""))
+                    last = run_str.split("-")[-1]  # -v<number> suffix
+                    if not (last.startswith("v") and last[1:].isdigit()):
+                        raise ValueError(
+                            f"dataset_path is a folder but args.run={run_str!r} has no -v<number> suffix"
+                        )
+                    matches = glob.glob(os.path.join(v, f"*-{last}.csv"))
+                    if len(matches) != 1:
+                        raise ValueError(
+                            f"Expected exactly 1 CSV matching *-{last}.csv in {v!r}, found {len(matches)} matches."
+                        )
+                    v = matches[0]
+
                 config["dataset"]["splits"].remove("train")
                 config["dataset"]["splits_custom"] = {
                     "train": {"init_with": "from_csv", "from_csv_kwargs": {"path_or_paths": v}}
@@ -358,7 +371,7 @@ class ConfigFactory:
             name = self.metaconfig["name"]
             args_str = ""
             for k, v in self.args.items():
-                if k in ["base_config", "run", "n_runs", "dataset", "classifier"]:
+                if k in ["base_config", "run", "n_runs", "dataset", "encoder", "classifier", "dataset_path"]:
                     continue
                 args_str += f"-{k}={v}"
             path_config = f"{path}/{name}/{name}-config{args_str}.yaml"
@@ -377,6 +390,18 @@ def preprocess_data(dataset: DatasetDict, tokenizer, classifier: bool, config: d
     metadata = DatasetMetadata(dataset=config["abbrev"])
 
     if config.get("cast_label") is not None:
+        if dataset["train"].features["label"].dtype in ["string", "large_string"]:
+
+            def map_fn(batch: dict) -> dict:
+                batch["label_int"] = metadata.label_2_idx(batch["label"])
+                return batch
+
+            dataset["train"] = dataset["train"].map(function=map_fn, batched=True)
+            dataset["train"] = dataset["train"].remove_columns(column_names=["label"])
+            dataset["train"] = dataset["train"].rename_column(
+                original_column_name="label_int",
+                new_column_name="label",
+            )
         dataset = dataset.cast_column(column="label", feature=ClassLabel(names=metadata.classes))
 
     if config.get("randsubset") is not None:
@@ -493,12 +518,16 @@ def expt_clf2(config: dict, run: int | str = 0):
 
 
 if __name__ == "__main__":
-    import yaml
+    import csv
+    import glob
+    
+    from datasets import ClassLabel, DatasetDict
     import evaluate
     import numpy as np
-    import torch
-    from datasets import ClassLabel, DatasetDict
     from pytorch_lightning import Callback
+    import torch
+    import yaml
+
     from transformers import (
         AutoModelForSequenceClassification,
         AutoTokenizer,
