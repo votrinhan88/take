@@ -1,5 +1,6 @@
-# Text Dataset Distillation (TextDD)
-A comprehensive framework for text dataset distillation and condensation experiments.
+# TAKE: Trajectory-Aware Knowledge Estimation for Text Dataset Distillation
+
+Official implementation of the paper **"TAKE: Trajectory-Aware Knowledge Estimation for Text Dataset Distillation"**, accepted at **ECML-PKDD 2026**.
 
 ## Repository Structure
 - `src/` — installable Python package
@@ -29,3 +30,16 @@ source .venv/bin/activate
 python run.py
 ```
 Interactive TUI — select infrastructure (Slurm/Local), spec, duration, experiment, then fill in arguments. Submits or runs directly.
+
+## Citation
+
+If you find this work useful, please cite:
+
+```bibtex
+@inproceedings{take2026,
+  title     = {TAKE: Trajectory-Aware Knowledge Estimation for Text Dataset Distillation},
+  author    = {Tri-Nhan Vo, Dang Nguyen, Sunil Gupta},
+  booktitle = {Proceedings of the European Conference on Machine Learning and Principles and Practice of Knowledge Discovery in Databases (ECML-PKDD)},
+  year      = {2026},
+}
+```
