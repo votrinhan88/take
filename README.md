@@ -36,7 +36,7 @@ Interactive TUI — select infrastructure (Slurm/Local), spec, duration, experim
 If you find this work useful, please cite:
 
 ```bibtex
-@inproceedings{take2026,
+@inproceedings{vo2026take,
   title     = {TAKE: Trajectory-Aware Knowledge Estimation for Text Dataset Distillation},
   author    = {Tri-Nhan Vo, Dang Nguyen, Sunil Gupta},
   booktitle = {Proceedings of the European Conference on Machine Learning and Principles and Practice of Knowledge Discovery in Databases (ECML-PKDD)},
